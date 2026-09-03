@@ -40,6 +40,11 @@ if [ -z "$old_version" ] && [ -x "$install_dir/gut" ]; then
   old_version="$("$install_dir/gut" --version 2>/dev/null | awk '{print $2}' || true)"
 fi
 
+if [ -z "$old_timestamp" ] && [ -n "$old_commit" ] && [ "$old_commit" != "unknown" ]; then
+  git -C "$tmp/gut" fetch --quiet --unshallow origin 2>/dev/null || true
+  old_timestamp="$(git -C "$tmp/gut" show -s --format='%ci' "$old_commit" 2>/dev/null | awk '{ print $1, substr($2, 1, 5), $3 }' || true)"
+fi
+
 printf '\n============================================================\n'
 if [ -n "$old_commit" ]; then
   printf '                       GUT UPGRADE\n'
