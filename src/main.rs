@@ -170,11 +170,15 @@ fn build_commit() -> &'static str {
 }
 
 fn upgrade() -> Result<ExitCode, String> {
+    let script = r#"
+set -eu
+commit="$(git ls-remote https://github.com/DotNaos/gut.git refs/heads/main | awk '{print $1}')"
+[ -n "$commit" ]
+curl -fsSL "https://raw.githubusercontent.com/DotNaos/gut/$commit/install.sh" | sh
+"#;
+
     let status = Command::new("sh")
-        .args([
-            "-c",
-            "curl -fsSL https://raw.githubusercontent.com/DotNaos/gut/main/install.sh | sh",
-        ])
+        .args(["-c", script])
         .env("GUT_UPGRADE_FROM", build_commit())
         .status()
         .map_err(|error| format!("failed to run upgrade: {error}"))?;
