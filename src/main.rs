@@ -35,15 +35,23 @@ enum Commands {
 
         #[arg(long, default_value = "main")]
         main: String,
+
+        /// Compare local branches instead of remote branches.
+        #[arg(long)]
+        local: bool,
     },
 
-    /// List remote branches, excluding main.
+    /// List branches, excluding main.
     Branches {
         #[arg(long, default_value = "origin")]
         remote: String,
 
         #[arg(long, default_value = "main")]
         main: String,
+
+        /// List local branches instead of remote branches.
+        #[arg(long)]
+        local: bool,
     },
 
     /// Diff a remote branch against the merge-base with main.
@@ -100,16 +108,24 @@ fn run() -> Result<ExitCode, String> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Status { remote, main } => {
+        Commands::Status {
+            remote,
+            main,
+            local,
+        } => {
             let output = StatusOutput {
-                branches: branch_status(&remote, &main)?,
+                branches: branch_status(&remote, &main, local)?,
                 worktrees: worktree_status()?,
             };
             print_status(cli.format, &output)?;
             Ok(ExitCode::SUCCESS)
         }
-        Commands::Branches { remote, main } => {
-            let branches = remote_branches(&remote, &main)?;
+        Commands::Branches {
+            remote,
+            main,
+            local,
+        } => {
+            let branches = branches(&remote, &main, local)?;
             print_list(cli.format, "BRANCHES", "branches", &branches)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -145,6 +161,24 @@ fn run() -> Result<ExitCode, String> {
     }
 }
 
+fn branches(remote: &str, main: &str, local: bool) -> Result<Vec<String>, String> {
+    if local {
+        let output = git_output(&[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads/",
+        ])?;
+
+        return Ok(output
+            .lines()
+            .filter(|branch| *branch != main)
+            .map(str::to_owned)
+            .collect());
+    }
+
+    remote_branches(remote, main)
+}
+
 fn remote_branches(remote: &str, main: &str) -> Result<Vec<String>, String> {
     let refs = format!("refs/remotes/{remote}/");
     let output = git_output(&["for-each-ref", "--format=%(refname:short)", &refs])?;
@@ -167,9 +201,13 @@ fn normalize_remote_branch(branch: &str, remote: &str) -> String {
     }
 }
 
-fn branch_status(remote: &str, main: &str) -> Result<BranchStatus, String> {
-    let branches = remote_branches(remote, main)?;
-    let main_ref = format!("{remote}/{main}");
+fn branch_status(remote: &str, main: &str, local: bool) -> Result<BranchStatus, String> {
+    let branches = branches(remote, main, local)?;
+    let main_ref = if local {
+        main.to_owned()
+    } else {
+        format!("{remote}/{main}")
+    };
     let main_tree_output = git_output(&["rev-parse", &format!("{main_ref}^{{tree}}")])?;
     let main_tree = main_tree_output.trim();
 
