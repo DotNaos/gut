@@ -22,6 +22,7 @@ git clone --depth 1 "$repo" "$tmp/gut"
 new_commit="$(git -C "$tmp/gut" rev-parse --short HEAD)"
 new_version="$(awk -F '"' '/^version = "/ { print $2; exit }' "$tmp/gut/Cargo.toml")"
 new_timestamp="$(git -C "$tmp/gut" show -s --format='%ci' HEAD | awk '{ print $1, substr($2, 1, 5), $3 }')"
+new_display_timestamp="$(printf '%s\n' "$new_timestamp" | awk '{ print $1, $2 }')"
 old_commit="${GUT_UPGRADE_FROM:-}"
 old_version="${GUT_UPGRADE_FROM_VERSION:-}"
 old_timestamp="${GUT_UPGRADE_FROM_TIMESTAMP:-}"
@@ -45,18 +46,20 @@ if [ -z "$old_timestamp" ] && [ -n "$old_commit" ] && [ "$old_commit" != "unknow
   old_timestamp="$(git -C "$tmp/gut" show -s --format='%ci' "$old_commit" 2>/dev/null | awk '{ print $1, substr($2, 1, 5), $3 }' || true)"
 fi
 
+old_display_timestamp="$(printf '%s\n' "$old_timestamp" | awk '{ print $1, $2 }')"
+
 printf '\n============================================================\n'
 if [ -n "$old_commit" ]; then
   printf '                       GUT UPGRADE\n'
   printf '============================================================\n'
-  printf '  FROM  v%-10s  %-7s  %s\n' "${old_version:-unknown}" "$old_commit" "${old_timestamp:-timestamp unknown}"
-  printf '  TO    v%-10s  %-7s  %s\n' "$new_version" "$new_commit" "$new_timestamp"
+  printf '  FROM  v%-10s  %-7s  %s\n' "${old_version:-unknown}" "$old_commit" "${old_display_timestamp:-timestamp unknown}"
+  printf '  TO    v%-10s  %-7s  %s\n' "$new_version" "$new_commit" "$new_display_timestamp"
 else
   printf '                       GUT INSTALL\n'
   printf '============================================================\n'
   printf '  VERSION  v%s\n' "$new_version"
   printf '  COMMIT   %s\n' "$new_commit"
-  printf '  DATE     %s\n' "$new_timestamp"
+  printf '  DATE     %s\n' "$new_display_timestamp"
 fi
 printf '============================================================\n\n'
 
@@ -96,6 +99,6 @@ esac
 
 printf '\n============================================================\n'
 printf '  INSTALLED  gut v%s (%s)\n' "$new_version" "$new_commit"
-printf '  COMMIT     %s\n' "$new_timestamp"
+printf '  COMMIT     %s\n' "$new_display_timestamp"
 printf '  PATH       %s/gut\n' "$install_dir"
 printf '============================================================\n'
