@@ -68,6 +68,9 @@ enum Commands {
     /// Show registered worktrees as clean or dirty.
     Worktrees,
 
+    /// Upgrade gut from source using the install script.
+    Upgrade,
+
     /// Generate shell completions.
     Completions {
         #[arg(value_enum)]
@@ -152,6 +155,7 @@ fn run() -> Result<ExitCode, String> {
             print_worktrees(cli.format, &status)?;
             Ok(ExitCode::SUCCESS)
         }
+        Commands::Upgrade => upgrade(),
         Commands::Completions { shell } => {
             let mut command = Cli::command();
             let name = command.get_name().to_owned();
@@ -159,6 +163,22 @@ fn run() -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+fn upgrade() -> Result<ExitCode, String> {
+    let status = Command::new("sh")
+        .args([
+            "-c",
+            "curl -fsSL https://raw.githubusercontent.com/DotNaos/gut/main/install.sh | sh",
+        ])
+        .status()
+        .map_err(|error| format!("failed to run upgrade: {error}"))?;
+
+    Ok(if status.success() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 fn branches(remote: &str, main: &str, local: bool) -> Result<Vec<String>, String> {
