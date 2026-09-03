@@ -30,16 +30,19 @@ case "$shell" in
     completion_dir="$HOME/.local/share/bash-completion/completions"
     mkdir -p "$completion_dir"
     "$install_dir/gut" completions bash > "$completion_dir/gut"
+    echo "Installed bash completions to $completion_dir/gut"
     ;;
   zsh)
-    completion_dir="$HOME/.zfunc"
+    completion_dir="$HOME/.zsh/completions"
     mkdir -p "$completion_dir"
     "$install_dir/gut" completions zsh > "$completion_dir/_gut"
+    echo "Installed zsh completions to $completion_dir/_gut"
     ;;
   fish)
     completion_dir="$HOME/.config/fish/completions"
     mkdir -p "$completion_dir"
     "$install_dir/gut" completions fish > "$completion_dir/gut.fish"
+    echo "Installed fish completions to $completion_dir/gut.fish"
     ;;
 esac
 
