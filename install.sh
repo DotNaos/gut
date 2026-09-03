@@ -18,11 +18,22 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
 git clone --depth 1 "$repo" "$tmp/gut"
-cargo build --release --manifest-path "$tmp/gut/Cargo.toml"
+new_commit="$(git -C "$tmp/gut" rev-parse --short HEAD)"
+old_commit="${GUT_UPGRADE_FROM:-}"
+
+if [ -n "$old_commit" ]; then
+  echo "Upgrading gut: $old_commit -> $new_commit"
+else
+  echo "Installing gut: $new_commit"
+fi
+
+GUT_BUILD_COMMIT="$new_commit" cargo build --release --manifest-path "$tmp/gut/Cargo.toml"
 
 mkdir -p "$install_dir"
-cp "$tmp/gut/target/release/gut" "$install_dir/gut"
-chmod +x "$install_dir/gut"
+new_binary="$install_dir/.gut.new.$$"
+cp "$tmp/gut/target/release/gut" "$new_binary"
+chmod +x "$new_binary"
+mv -f "$new_binary" "$install_dir/gut"
 
 shell="$(basename "${SHELL:-}")"
 case "$shell" in
@@ -46,4 +57,4 @@ case "$shell" in
     ;;
 esac
 
-echo "Installed gut to $install_dir/gut"
+echo "Installed gut $new_commit to $install_dir/gut"
