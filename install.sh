@@ -23,6 +23,10 @@ new_version="$(awk -F '"' '/^version = "/ { print $2; exit }' "$tmp/gut/Cargo.to
 old_commit="${GUT_UPGRADE_FROM:-}"
 old_version="${GUT_UPGRADE_FROM_VERSION:-}"
 
+if [ -z "$old_version" ] && [ -x "$install_dir/gut" ]; then
+  old_version="$("$install_dir/gut" --version 2>/dev/null | awk '{print $2}' || true)"
+fi
+
 printf '\n============================================================\n'
 if [ -n "$old_commit" ]; then
   printf '                       GUT UPGRADE\n'
