@@ -165,12 +165,17 @@ fn run() -> Result<ExitCode, String> {
     }
 }
 
+fn build_commit() -> &'static str {
+    option_env!("GUT_BUILD_COMMIT").unwrap_or("unknown")
+}
+
 fn upgrade() -> Result<ExitCode, String> {
     let status = Command::new("sh")
         .args([
             "-c",
             "curl -fsSL https://raw.githubusercontent.com/DotNaos/gut/main/install.sh | sh",
         ])
+        .env("GUT_UPGRADE_FROM", build_commit())
         .status()
         .map_err(|error| format!("failed to run upgrade: {error}"))?;
 
