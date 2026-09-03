@@ -24,6 +24,16 @@ enum OutputFormat {
     Human,
     Plain,
     Json,
+    Values,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum StatusFilter {
+    AlreadyInMain,
+    WouldChangeMain,
+    Conflicts,
+    CleanWorktrees,
+    DirtyWorktrees,
 }
 
 #[derive(Subcommand)]
@@ -39,6 +49,10 @@ enum Commands {
         /// Compare local branches instead of remote branches.
         #[arg(long)]
         local: bool,
+
+        /// Only show selected status categories. Repeat or comma-separate values.
+        #[arg(long, value_enum, value_delimiter = ',')]
+        filter: Vec<StatusFilter>,
     },
 
     /// List branches, excluding main.
@@ -78,20 +92,20 @@ enum Commands {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct BranchStatus {
     already_in_main: Vec<String>,
     would_change_main: Vec<String>,
     conflicts: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct WorktreeStatus {
     clean: Vec<String>,
     dirty: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct StatusOutput {
     branches: BranchStatus,
     worktrees: WorktreeStatus,
@@ -115,12 +129,13 @@ fn run() -> Result<ExitCode, String> {
             remote,
             main,
             local,
+            filter,
         } => {
             let output = StatusOutput {
                 branches: branch_status(&remote, &main, local)?,
                 worktrees: worktree_status()?,
             };
-            print_status(cli.format, &output)?;
+            print_status(cli.format, &output, &filter)?;
             Ok(ExitCode::SUCCESS)
         }
         Commands::Branches {
@@ -180,6 +195,7 @@ curl -fsSL "https://raw.githubusercontent.com/DotNaos/gut/$commit/install.sh" | 
     let status = Command::new("sh")
         .args(["-c", script])
         .env("GUT_UPGRADE_FROM", build_commit())
+        .env("GUT_UPGRADE_FROM_VERSION", env!("CARGO_PKG_VERSION"))
         .status()
         .map_err(|error| format!("failed to run upgrade: {error}"))?;
 
@@ -319,40 +335,131 @@ fn git_output(args: &[&str]) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|_| "git returned non-UTF-8 output".to_owned())
 }
 
-fn print_status(format: OutputFormat, output: &StatusOutput) -> Result<(), String> {
+fn filter_selected(filters: &[StatusFilter], filter: StatusFilter) -> bool {
+    filters.is_empty() || filters.contains(&filter)
+}
+
+fn filtered_status(output: &StatusOutput, filters: &[StatusFilter]) -> StatusOutput {
+    let mut filtered = output.clone();
+
+    if !filter_selected(filters, StatusFilter::AlreadyInMain) {
+        filtered.branches.already_in_main.clear();
+    }
+    if !filter_selected(filters, StatusFilter::WouldChangeMain) {
+        filtered.branches.would_change_main.clear();
+    }
+    if !filter_selected(filters, StatusFilter::Conflicts) {
+        filtered.branches.conflicts.clear();
+    }
+    if !filter_selected(filters, StatusFilter::CleanWorktrees) {
+        filtered.worktrees.clean.clear();
+    }
+    if !filter_selected(filters, StatusFilter::DirtyWorktrees) {
+        filtered.worktrees.dirty.clear();
+    }
+
+    filtered
+}
+
+fn print_status(
+    format: OutputFormat,
+    output: &StatusOutput,
+    filters: &[StatusFilter],
+) -> Result<(), String> {
     match format {
         OutputFormat::Human => {
-            print_section("ALREADY IN MAIN", &output.branches.already_in_main);
-            println!();
-            print_section("WOULD CHANGE MAIN", &output.branches.would_change_main);
-            println!();
-            print_section("CONFLICTS", &output.branches.conflicts);
-            println!();
-            print_section("CLEAN WORKTREES", &output.worktrees.clean);
-            println!();
-            print_section("DIRTY WORKTREES", &output.worktrees.dirty);
+            let sections = [
+                (
+                    StatusFilter::AlreadyInMain,
+                    "ALREADY IN MAIN",
+                    &output.branches.already_in_main,
+                ),
+                (
+                    StatusFilter::WouldChangeMain,
+                    "WOULD CHANGE MAIN",
+                    &output.branches.would_change_main,
+                ),
+                (
+                    StatusFilter::Conflicts,
+                    "CONFLICTS",
+                    &output.branches.conflicts,
+                ),
+                (
+                    StatusFilter::CleanWorktrees,
+                    "CLEAN WORKTREES",
+                    &output.worktrees.clean,
+                ),
+                (
+                    StatusFilter::DirtyWorktrees,
+                    "DIRTY WORKTREES",
+                    &output.worktrees.dirty,
+                ),
+            ];
+
+            let mut printed = false;
+            for (filter, title, values) in sections {
+                if filter_selected(filters, filter) {
+                    if printed {
+                        println!();
+                    }
+                    print_section(title, values);
+                    printed = true;
+                }
+            }
         }
         OutputFormat::Plain => {
-            for branch in &output.branches.already_in_main {
-                println!("already-in-main\t{branch}");
+            if filter_selected(filters, StatusFilter::AlreadyInMain) {
+                for branch in &output.branches.already_in_main {
+                    println!("already-in-main\t{branch}");
+                }
             }
-            for branch in &output.branches.would_change_main {
-                println!("would-change-main\t{branch}");
+            if filter_selected(filters, StatusFilter::WouldChangeMain) {
+                for branch in &output.branches.would_change_main {
+                    println!("would-change-main\t{branch}");
+                }
             }
-            for branch in &output.branches.conflicts {
-                println!("conflict\t{branch}");
+            if filter_selected(filters, StatusFilter::Conflicts) {
+                for branch in &output.branches.conflicts {
+                    println!("conflict\t{branch}");
+                }
             }
-            for path in &output.worktrees.clean {
-                println!("clean\t{path}");
+            if filter_selected(filters, StatusFilter::CleanWorktrees) {
+                for path in &output.worktrees.clean {
+                    println!("clean\t{path}");
+                }
             }
-            for path in &output.worktrees.dirty {
-                println!("dirty\t{path}");
+            if filter_selected(filters, StatusFilter::DirtyWorktrees) {
+                for path in &output.worktrees.dirty {
+                    println!("dirty\t{path}");
+                }
             }
         }
         OutputFormat::Json => println!(
             "{}",
-            serde_json::to_string_pretty(output).map_err(|error| error.to_string())?
+            serde_json::to_string_pretty(&filtered_status(output, filters))
+                .map_err(|error| error.to_string())?
         ),
+        OutputFormat::Values => {
+            if filters.is_empty() {
+                return Err("--format values requires at least one --filter".to_owned());
+            }
+
+            if filter_selected(filters, StatusFilter::AlreadyInMain) {
+                print_values(&output.branches.already_in_main);
+            }
+            if filter_selected(filters, StatusFilter::WouldChangeMain) {
+                print_values(&output.branches.would_change_main);
+            }
+            if filter_selected(filters, StatusFilter::Conflicts) {
+                print_values(&output.branches.conflicts);
+            }
+            if filter_selected(filters, StatusFilter::CleanWorktrees) {
+                print_values(&output.worktrees.clean);
+            }
+            if filter_selected(filters, StatusFilter::DirtyWorktrees) {
+                print_values(&output.worktrees.dirty);
+            }
+        }
     }
 
     Ok(())
@@ -377,6 +484,10 @@ fn print_worktrees(format: OutputFormat, status: &WorktreeStatus) -> Result<(), 
             "{}",
             serde_json::to_string_pretty(status).map_err(|error| error.to_string())?
         ),
+        OutputFormat::Values => {
+            print_values(&status.clean);
+            print_values(&status.dirty);
+        }
     }
 
     Ok(())
@@ -390,11 +501,7 @@ fn print_list(
 ) -> Result<(), String> {
     match format {
         OutputFormat::Human => print_section(human_title, values),
-        OutputFormat::Plain => {
-            for value in values {
-                println!("{value}");
-            }
-        }
+        OutputFormat::Plain | OutputFormat::Values => print_values(values),
         OutputFormat::Json => {
             let mut object = BTreeMap::new();
             object.insert(json_key, values);
@@ -408,9 +515,13 @@ fn print_list(
     Ok(())
 }
 
-fn print_section(title: &str, values: &[String]) {
-    println!("=== {title} ===");
+fn print_values(values: &[String]) {
     for value in values {
         println!("{value}");
     }
+}
+
+fn print_section(title: &str, values: &[String]) {
+    println!("=== {title} ===");
+    print_values(values);
 }
