@@ -1,9 +1,32 @@
-use std::{env, fs, path::Path, process::Command};
+use std::{
+    env, fs,
+    path::Path,
+    process::{Command, Stdio},
+};
+
+use serde::Serialize;
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlacementKind {
+    Update,
+    Before,
+    After,
+}
 
 pub enum Placement {
     Update(String),
     Before(String),
     After(String),
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitPlacementResult {
+    pub operation: PlacementKind,
+    pub target_before: String,
+    pub head_before: String,
+    pub head_after: String,
 }
 
 impl Placement {
@@ -21,11 +44,15 @@ impl Placement {
     }
 }
 
-pub fn place_current_changes(placement: Placement, message: Option<&str>) -> Result<(), String> {
-    let (target_input, mode) = match &placement {
-        Placement::Update(target) => (target.as_str(), "update"),
-        Placement::Before(target) => (target.as_str(), "before"),
-        Placement::After(target) => (target.as_str(), "after"),
+pub fn place_current_changes(
+    placement: Placement,
+    message: Option<&str>,
+    quiet: bool,
+) -> Result<CommitPlacementResult, String> {
+    let (target_input, mode, operation) = match &placement {
+        Placement::Update(target) => (target.as_str(), "update", PlacementKind::Update),
+        Placement::Before(target) => (target.as_str(), "before", PlacementKind::Before),
+        Placement::After(target) => (target.as_str(), "after", PlacementKind::After),
     };
 
     if matches!(placement, Placement::Update(_)) && message.is_some() {
@@ -52,12 +79,14 @@ pub fn place_current_changes(placement: Placement, message: Option<&str>) -> Res
 
     match placement {
         Placement::Update(_) => {
-            git(&["commit", "--fixup", &target])?;
+            let mut commit = Command::new("git");
+            commit.args(["commit", "--fixup", &target]);
+            run_git_command(&mut commit, "commit", quiet)?;
             let mut rebase = Command::new("git");
             rebase.args(["rebase", "--interactive", "--autosquash"]);
             add_rebase_base(&mut rebase, &target)?;
             rebase.env("GIT_SEQUENCE_EDITOR", ":");
-            run_git_command(&mut rebase, "history rewrite")?;
+            run_git_command(&mut rebase, "history rewrite", quiet)?;
         }
         Placement::Before(_) | Placement::After(_) => {
             let mut commit = Command::new("git");
@@ -65,7 +94,7 @@ pub fn place_current_changes(placement: Placement, message: Option<&str>) -> Res
             if let Some(message) = message {
                 commit.args(["-m", message]);
             }
-            run_git_command(&mut commit, "commit")?;
+            run_git_command(&mut commit, "commit", quiet)?;
 
             let inserted = git_output(&["rev-parse", "HEAD"])?;
             let inserted = inserted.trim().to_owned();
@@ -79,11 +108,17 @@ pub fn place_current_changes(placement: Placement, message: Option<&str>) -> Res
                 .env("GUT_SEQUENCE_MODE", mode)
                 .env("GUT_SEQUENCE_TARGET", &target)
                 .env("GUT_SEQUENCE_INSERT", &inserted);
-            run_git_command(&mut rebase, "history rewrite")?;
+            run_git_command(&mut rebase, "history rewrite", quiet)?;
         }
     }
 
-    Ok(())
+    let head_after = git_output(&["rev-parse", "HEAD"])?;
+    Ok(CommitPlacementResult {
+        operation,
+        target_before: target,
+        head_before: original_head,
+        head_after: head_after.trim().to_owned(),
+    })
 }
 
 pub fn edit_rebase_todo(path: &Path) -> Result<(), String> {
@@ -154,6 +189,8 @@ fn shell_quote(value: &str) -> String {
 fn require_attached_branch() -> Result<(), String> {
     let status = Command::new("git")
         .args(["symbolic-ref", "--quiet", "HEAD"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map_err(|error| format!("failed to inspect HEAD: {error}"))?;
     if status.success() {
@@ -200,7 +237,7 @@ fn add_rebase_base(command: &mut Command, target: &str) -> Result<(), String> {
 fn git(args: &[&str]) -> Result<(), String> {
     let mut command = Command::new("git");
     command.args(args);
-    run_git_command(&mut command, "git command")
+    run_git_command(&mut command, "git command", false)
 }
 
 fn git_status(args: &[&str]) -> Result<bool, String> {
@@ -222,7 +259,10 @@ fn git_output(args: &[&str]) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|_| "git returned non-UTF-8 output".to_owned())
 }
 
-fn run_git_command(command: &mut Command, operation: &str) -> Result<(), String> {
+fn run_git_command(command: &mut Command, operation: &str, quiet: bool) -> Result<(), String> {
+    if quiet {
+        command.stdout(Stdio::null());
+    }
     let status = command
         .status()
         .map_err(|error| format!("failed to run {operation}: {error}"))?;

@@ -71,6 +71,24 @@ gut status --format plain
 gut status --format json
 ```
 
+Commit placement also has structured JSON output:
+
+```sh
+gut commit --update <commit> --format json
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "data": {
+    "operation": "update",
+    "targetBefore": "<commit>",
+    "headBefore": "<commit>",
+    "headAfter": "<commit>"
+  }
+}
+```
+
 ## Shell completion
 
 Generate completions directly:

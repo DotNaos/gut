@@ -64,7 +64,7 @@ fn subjects(repo: &Path) -> Vec<String> {
     values
 }
 
-fn gut(repo: &Path, args: &[&str]) {
+fn gut_output(repo: &Path, args: &[&str]) -> std::process::Output {
     let output = Command::new(env!("CARGO_BIN_EXE_gut"))
         .current_dir(repo)
         .args(args)
@@ -78,6 +78,11 @@ fn gut(repo: &Path, args: &[&str]) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    output
+}
+
+fn gut(repo: &Path, args: &[&str]) {
+    gut_output(repo, args);
 }
 
 #[test]
@@ -132,4 +137,24 @@ fn after_inserts_commit_after_target() {
         "after"
     );
     assert!(git(&repo, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn json_output_is_versioned_and_structured() {
+    let repo = repo();
+    let old_b = commit(&repo, "B");
+    let old_head = git(&repo, &["rev-parse", "HEAD"]);
+    fs::write(repo.join("placement.txt"), "json\n").unwrap();
+
+    let output = gut_output(&repo, &["--format", "json", "commit", "--update", &old_b]);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+
+    assert_eq!(value["schemaVersion"], 1);
+    assert_eq!(value["data"]["operation"], "update");
+    assert_eq!(value["data"]["targetBefore"], old_b);
+    assert_eq!(value["data"]["headBefore"], old_head);
+    assert_eq!(
+        value["data"]["headAfter"],
+        git(&repo, &["rev-parse", "HEAD"])
+    );
 }

@@ -131,6 +131,13 @@ struct StatusOutput {
     worktrees: WorktreeStatus,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonEnvelope<T> {
+    schema_version: u32,
+    data: T,
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
@@ -156,7 +163,21 @@ fn run() -> Result<ExitCode, String> {
             message,
         } => {
             let placement = commit::Placement::from_args(update, before, after)?;
-            commit::place_current_changes(placement, message.as_deref())?;
+            let output = commit::place_current_changes(
+                placement,
+                message.as_deref(),
+                matches!(cli.format, OutputFormat::Json),
+            )?;
+            if matches!(cli.format, OutputFormat::Json) {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&JsonEnvelope {
+                        schema_version: 1,
+                        data: output,
+                    })
+                    .map_err(|error| error.to_string())?
+                );
+            }
             Ok(ExitCode::SUCCESS)
         }
         Commands::Status {
