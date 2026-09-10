@@ -19,6 +19,7 @@ gut commit --update <commit>
 gut commit --before <commit> -m "message"
 gut commit --after <commit> -m "message"
 gut status
+gut review
 gut branches
 gut diff <branch>
 gut worktrees
@@ -26,6 +27,8 @@ gut completions <shell>
 ```
 
 `gut commit` places all current changes at a specific point in linear local history. `--update` adds them to an existing commit; `--before` and `--after` create a new commit around the selected commit and rewrite descendants automatically.
+
+`gut review` shows the full current-branch diff against the merge-base with `origin/main`. Use `--base <ref>` for another base, or `--stat`, `--commits`, and `--files` for focused human-readable views. With `--format json`, it returns the resolved base, merge-base, HEAD, commits, and changed files as structured data.
 
 `gut status` is the combined overview: it checks whether each remote branch would still change `origin/main`, and whether registered worktrees are clean or dirty.
 
