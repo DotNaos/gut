@@ -9,6 +9,8 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use serde::Serialize;
 
+mod commit;
+
 #[derive(Parser)]
 #[command(name = "gut", version, about = "Good Git: small Git helpers")]
 struct Cli {
@@ -38,6 +40,24 @@ enum StatusFilter {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(name = "__sequence-editor", hide = true)]
+    SequenceEditor { todo: PathBuf },
+
+    /// Place the current changes before, into, or after an existing commit.
+    Commit {
+        #[arg(long, conflicts_with_all = ["before", "after"], value_name = "COMMIT")]
+        update: Option<String>,
+
+        #[arg(long, conflicts_with_all = ["update", "after"], value_name = "COMMIT")]
+        before: Option<String>,
+
+        #[arg(long, conflicts_with_all = ["update", "before"], value_name = "COMMIT")]
+        after: Option<String>,
+
+        #[arg(short = 'm', long)]
+        message: Option<String>,
+    },
+
     /// Show branch inclusion state and worktree cleanliness.
     Status {
         #[arg(long, default_value = "origin")]
@@ -125,6 +145,20 @@ fn run() -> Result<ExitCode, String> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::SequenceEditor { todo } => {
+            commit::edit_rebase_todo(&todo)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Commit {
+            update,
+            before,
+            after,
+            message,
+        } => {
+            let placement = commit::Placement::from_args(update, before, after)?;
+            commit::place_current_changes(placement, message.as_deref())?;
+            Ok(ExitCode::SUCCESS)
+        }
         Commands::Status {
             remote,
             main,
