@@ -20,6 +20,7 @@ gut commit --before <commit> -m "message"
 gut commit --after <commit> -m "message"
 gut status
 gut review
+gut log
 gut op log
 gut op diff <operation>
 gut op undo [operation]
@@ -31,7 +32,9 @@ gut completions <shell>
 
 `gut commit` places all current changes at a specific point in linear local history. `--update` adds them to an existing commit; `--before` and `--after` create a new commit around the selected commit and rewrite descendants automatically.
 
-`gut review` shows the full current-branch diff against the merge-base with `origin/main`. Use `--base <ref>` for another base, or `--stat`, `--commits`, and `--files` for focused human-readable views. With `--format json`, it returns the resolved base, merge-base, HEAD, commits, and changed files as structured data.
+`gut review` shows the full current-branch diff against the merge-base with `origin/main`. Use `--base <ref>` for another base, or `--stat`, `--commits`, and `--files` for focused human-readable views. JSON review output includes branch/base/merge-base/HEAD information, commits, changed files, additions/deletions, parsed diff hunks, stat output, and the complete patch.
+
+`gut log` shows the current commit history. Its structured form includes the current branch, HEAD, commit IDs, parent IDs, and subjects.
 
 History-editing operations are recorded locally by `gut`. `gut op log` lists them, `gut op diff <operation>` shows the exact before/after diff, and `gut op undo [operation]` restores the state from before an operation. Undo requires a clean working tree and never pushes or rewrites a remote. Gut keeps before/after Git refs for recorded operations so rewritten commits remain reachable locally.
 
@@ -78,6 +81,17 @@ For scripting:
 gut status --format plain
 gut status --format json
 ```
+
+`--json` is a global shortcut for `--format json`, so editor-facing calls can use:
+
+```sh
+gut status --json
+gut log --json
+gut review --json
+gut op log --json
+```
+
+All JSON-capable commands use a versioned top-level envelope with `schemaVersion` and `data`. Existing command-specific field names remain stable inside `data`.
 
 Commit placement also has structured JSON output:
 

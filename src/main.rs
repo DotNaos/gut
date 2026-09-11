@@ -10,6 +10,7 @@ use clap_complete::{Shell, generate};
 use serde::Serialize;
 
 mod commit;
+mod log;
 mod operation;
 mod review;
 
@@ -18,6 +19,10 @@ mod review;
 struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = OutputFormat::Human)]
     format: OutputFormat,
+
+    /// Shortcut for --format json.
+    #[arg(long, global = true, conflicts_with = "format")]
+    json: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -105,6 +110,9 @@ enum Commands {
         files: bool,
     },
 
+    /// Show commit history for the current branch.
+    Log,
+
     /// Inspect or restore gut operation history.
     Op {
         #[command(subcommand)]
@@ -185,6 +193,11 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, String> {
     let cli = Cli::parse();
+    let format = if cli.json {
+        OutputFormat::Json
+    } else {
+        cli.format
+    };
 
     match cli.command {
         Commands::SequenceEditor { todo } => {
@@ -201,9 +214,9 @@ fn run() -> Result<ExitCode, String> {
             let output = commit::place_current_changes(
                 placement,
                 message.as_deref(),
-                matches!(cli.format, OutputFormat::Json),
+                matches!(format, OutputFormat::Json),
             )?;
-            if matches!(cli.format, OutputFormat::Json) {
+            if matches!(format, OutputFormat::Json) {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&JsonEnvelope {
@@ -225,7 +238,7 @@ fn run() -> Result<ExitCode, String> {
                 branches: branch_status(&remote, &main, local)?,
                 worktrees: worktree_status()?,
             };
-            print_status(cli.format, &output, &filter)?;
+            print_status(format, &output, &filter)?;
             Ok(ExitCode::SUCCESS)
         }
         Commands::Branches {
@@ -234,7 +247,7 @@ fn run() -> Result<ExitCode, String> {
             local,
         } => {
             let branches = branches(&remote, &main, local)?;
-            print_list(cli.format, "BRANCHES", "branches", &branches)?;
+            print_list(format, "BRANCHES", "branches", &branches)?;
             Ok(ExitCode::SUCCESS)
         }
         Commands::Review {
@@ -243,8 +256,8 @@ fn run() -> Result<ExitCode, String> {
             commits,
             files,
         } => {
-            if matches!(cli.format, OutputFormat::Json) {
-                let output = review::inspect(&base)?;
+            let output = review::inspect(&base)?;
+            if matches!(format, OutputFormat::Json) {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&JsonEnvelope {
@@ -254,13 +267,44 @@ fn run() -> Result<ExitCode, String> {
                     .map_err(|error| error.to_string())?
                 );
             } else if stat {
-                review::show_stat(&base)?;
+                print!("{}", output.stat);
             } else if commits {
-                review::show_commits(&base)?;
+                for commit in &output.commits {
+                    let short = &commit.id[..commit.id.len().min(12)];
+                    println!("{short} {}", commit.subject);
+                }
             } else if files {
-                review::show_files(&base)?;
+                for file in &output.files {
+                    println!("{}\t{}", file.status, file.path);
+                }
             } else {
-                review::show_patch(&base)?;
+                print!("{}", output.patch);
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Log => {
+            let output = log::inspect()?;
+            if matches!(format, OutputFormat::Json) {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&JsonEnvelope {
+                        schema_version: 1,
+                        data: output,
+                    })
+                    .map_err(|error| error.to_string())?
+                );
+            } else {
+                for commit in &output.commits {
+                    match format {
+                        OutputFormat::Human => {
+                            let short = &commit.id[..commit.id.len().min(12)];
+                            println!("{short} {}", commit.subject);
+                        }
+                        OutputFormat::Plain => println!("{}\t{}", commit.id, commit.subject),
+                        OutputFormat::Values => println!("{}", commit.id),
+                        OutputFormat::Json => unreachable!(),
+                    }
+                }
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -268,7 +312,7 @@ fn run() -> Result<ExitCode, String> {
             match command {
                 OpCommands::Log => {
                     let records = operation::log()?;
-                    if matches!(cli.format, OutputFormat::Json) {
+                    if matches!(format, OutputFormat::Json) {
                         println!(
                             "{}",
                             serde_json::to_string_pretty(&JsonEnvelope {
@@ -279,7 +323,7 @@ fn run() -> Result<ExitCode, String> {
                         );
                     } else {
                         for record in records {
-                            match cli.format {
+                            match format {
                                 OutputFormat::Human => {
                                     let target = record
                                         .target
@@ -312,7 +356,7 @@ fn run() -> Result<ExitCode, String> {
                     }
                 }
                 OpCommands::Diff { operation: id } => {
-                    if matches!(cli.format, OutputFormat::Json) {
+                    if matches!(format, OutputFormat::Json) {
                         let output = operation::diff(&id)?;
                         println!(
                             "{}",
@@ -328,7 +372,7 @@ fn run() -> Result<ExitCode, String> {
                 }
                 OpCommands::Undo { operation: id } => {
                     let output = operation::undo(id.as_deref())?;
-                    if matches!(cli.format, OutputFormat::Json) {
+                    if matches!(format, OutputFormat::Json) {
                         println!(
                             "{}",
                             serde_json::to_string_pretty(&JsonEnvelope {
@@ -338,7 +382,7 @@ fn run() -> Result<ExitCode, String> {
                             .map_err(|error| error.to_string())?
                         );
                     } else {
-                        match cli.format {
+                        match format {
                             OutputFormat::Human => println!(
                                 "restored {} -> {} (operation {})",
                                 output.head_before, output.head_after, output.id
@@ -375,7 +419,7 @@ fn run() -> Result<ExitCode, String> {
         }
         Commands::Worktrees => {
             let status = worktree_status()?;
-            print_worktrees(cli.format, &status)?;
+            print_worktrees(format, &status)?;
             Ok(ExitCode::SUCCESS)
         }
         Commands::Upgrade => upgrade(),
@@ -640,8 +684,11 @@ fn print_status(
         }
         OutputFormat::Json => println!(
             "{}",
-            serde_json::to_string_pretty(&filtered_status(output, filters))
-                .map_err(|error| error.to_string())?
+            serde_json::to_string_pretty(&JsonEnvelope {
+                schema_version: 1,
+                data: filtered_status(output, filters),
+            })
+            .map_err(|error| error.to_string())?
         ),
         OutputFormat::Values => {
             if filters.is_empty() {
@@ -686,7 +733,11 @@ fn print_worktrees(format: OutputFormat, status: &WorktreeStatus) -> Result<(), 
         }
         OutputFormat::Json => println!(
             "{}",
-            serde_json::to_string_pretty(status).map_err(|error| error.to_string())?
+            serde_json::to_string_pretty(&JsonEnvelope {
+                schema_version: 1,
+                data: status,
+            })
+            .map_err(|error| error.to_string())?
         ),
         OutputFormat::Values => {
             print_values(&status.clean);
@@ -711,7 +762,11 @@ fn print_list(
             object.insert(json_key, values);
             println!(
                 "{}",
-                serde_json::to_string_pretty(&object).map_err(|error| error.to_string())?
+                serde_json::to_string_pretty(&JsonEnvelope {
+                    schema_version: 1,
+                    data: object,
+                })
+                .map_err(|error| error.to_string())?
             );
         }
     }
