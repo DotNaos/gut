@@ -31,7 +31,9 @@ gut runtime
 gut completions <shell>
 ```
 
-`gut commit` places all current changes at a specific point in linear local history. `--update` adds them to an existing commit; `--before` and `--after` create a new commit around the selected commit and rewrite descendants automatically.
+`gut commit` places all current changes at a specific point in local history. `--update` adds them to an existing commit; `--before` and `--after` create a new commit around the selected commit and rewrite descendants automatically. Histories containing merges are rewritten with merge topology preserved. The target itself must be a non-merge commit; placement directly relative to a merge commit is rejected as ambiguous.
+
+If a history rewrite conflicts or otherwise fails, `gut` aborts the rewrite and restores the original HEAD, working-tree contents, and Git index. The protected before-state ref is retained if automatic rollback itself cannot complete.
 
 `gut review` shows the full current-branch diff against the merge-base with `origin/main`. Use `--base <ref>` for another base, or `--stat`, `--commits`, and `--files` for focused human-readable views. JSON review output includes branch/base/merge-base/HEAD information, commits, changed files, additions/deletions, parsed diff hunks, stat output, and the complete patch.
 

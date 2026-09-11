@@ -1,6 +1,7 @@
 use std::{
     env, fs,
-    path::Path,
+    io::ErrorKind,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -71,10 +72,20 @@ pub fn place_current_changes(
 
     require_attached_branch()?;
     require_ancestor(&target, &original_head)?;
-    require_linear_history(&target, &original_head)?;
+    require_supported_target(&target)?;
+    let preserve_merges = history_contains_merges(&target, &original_head)?;
+    let index_snapshot = IndexSnapshot::capture()?;
 
-    git(&["add", "-A"])?;
+    if let Err(error) = git(&["add", "-A"]) {
+        if let Err(restore_error) = index_snapshot.restore() {
+            return Err(format!(
+                "{error}; failed to restore Git index: {restore_error}"
+            ));
+        }
+        return Err(error);
+    }
     if git_status(&["diff", "--cached", "--quiet"])? {
+        index_snapshot.restore()?;
         return Err("there are no changes to commit".to_owned());
     }
 
@@ -83,7 +94,17 @@ pub fn place_current_changes(
         PlacementKind::Before => crate::operation::OperationKind::Before,
         PlacementKind::After => crate::operation::OperationKind::After,
     };
-    let pending = crate::operation::begin(operation_kind, Some(target.clone()))?;
+    let pending = match crate::operation::begin(operation_kind, Some(target.clone())) {
+        Ok(pending) => pending,
+        Err(error) => {
+            if let Err(restore_error) = index_snapshot.restore() {
+                return Err(format!(
+                    "{error}; failed to restore Git index: {restore_error}"
+                ));
+            }
+            return Err(error);
+        }
+    };
 
     let rewrite = (|| -> Result<(), String> {
         match placement {
@@ -92,7 +113,11 @@ pub fn place_current_changes(
                 commit.args(["commit", "--fixup", &target]);
                 run_git_command(&mut commit, "commit", quiet)?;
                 let mut rebase = Command::new("git");
-                rebase.args(["rebase", "--interactive", "--autosquash"]);
+                rebase.arg("rebase");
+                if preserve_merges {
+                    rebase.arg("--rebase-merges");
+                }
+                rebase.args(["--interactive", "--autosquash"]);
                 add_rebase_base(&mut rebase, &target)?;
                 rebase.env("GIT_SEQUENCE_EDITOR", ":");
                 run_git_command(&mut rebase, "history rewrite", quiet)?;
@@ -110,7 +135,11 @@ pub fn place_current_changes(
                 let editor = sequence_editor_command()?;
 
                 let mut rebase = Command::new("git");
-                rebase.args(["rebase", "--interactive"]);
+                rebase.arg("rebase");
+                if preserve_merges {
+                    rebase.arg("--rebase-merges");
+                }
+                rebase.arg("--interactive");
                 add_rebase_base(&mut rebase, &target)?;
                 rebase
                     .env("GIT_SEQUENCE_EDITOR", editor)
@@ -124,6 +153,12 @@ pub fn place_current_changes(
     })();
 
     if let Err(error) = rewrite {
+        if let Err(rollback_error) = rollback_failed_rewrite(&original_head, &index_snapshot) {
+            return Err(format!(
+                "{error}; automatic rollback failed: {rollback_error}; original HEAD is protected at {}",
+                pending.recovery_ref()
+            ));
+        }
         pending.abort();
         return Err(error);
     }
@@ -226,17 +261,86 @@ fn require_ancestor(target: &str, head: &str) -> Result<(), String> {
     }
 }
 
-fn require_linear_history(target: &str, head: &str) -> Result<(), String> {
-    let range = format!("{target}..{head}");
-    let merges = git_output(&["rev-list", "--merges", &range])?;
+fn require_supported_target(target: &str) -> Result<(), String> {
     let target_parents = git_output(&["rev-list", "--parents", "-n", "1", target])?;
-    let target_is_merge = target_parents.split_whitespace().count() > 2;
-
-    if target_is_merge || !merges.trim().is_empty() {
-        Err("commit placement currently supports linear history only".to_owned())
+    if target_parents.split_whitespace().count() > 2 {
+        Err(
+            "target commit is a merge commit; choose a non-merge commit because placement relative to a merge is ambiguous"
+                .to_owned(),
+        )
     } else {
         Ok(())
     }
+}
+
+fn history_contains_merges(target: &str, head: &str) -> Result<bool, String> {
+    let range = format!("{target}..{head}");
+    Ok(!git_output(&["rev-list", "--merges", &range])?
+        .trim()
+        .is_empty())
+}
+
+struct IndexSnapshot {
+    path: PathBuf,
+    contents: Option<Vec<u8>>,
+}
+
+impl IndexSnapshot {
+    fn capture() -> Result<Self, String> {
+        let path = git_output(&["rev-parse", "--git-path", "index"])?;
+        let path = PathBuf::from(path.trim());
+        let path = if path.is_absolute() {
+            path
+        } else {
+            env::current_dir()
+                .map_err(|error| format!("failed to inspect current directory: {error}"))?
+                .join(path)
+        };
+        let contents = match fs::read(&path) {
+            Ok(contents) => Some(contents),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(format!(
+                    "failed to snapshot Git index {}: {error}",
+                    path.display()
+                ));
+            }
+        };
+        Ok(Self { path, contents })
+    }
+
+    fn restore(&self) -> Result<(), String> {
+        match &self.contents {
+            Some(contents) => fs::write(&self.path, contents)
+                .map_err(|error| format!("failed to restore Git index: {error}")),
+            None => match fs::remove_file(&self.path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(format!("failed to restore Git index: {error}")),
+            },
+        }
+    }
+}
+
+fn rollback_failed_rewrite(
+    original_head: &str,
+    index_snapshot: &IndexSnapshot,
+) -> Result<(), String> {
+    let _ = Command::new("git")
+        .args(["rebase", "--abort"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let reset = Command::new("git")
+        .args(["reset", "--mixed", original_head])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| format!("failed to restore HEAD: {error}"))?;
+    if !reset.success() {
+        return Err("failed to restore HEAD and working tree".to_owned());
+    }
+    index_snapshot.restore()
 }
 
 fn add_rebase_base(command: &mut Command, target: &str) -> Result<(), String> {

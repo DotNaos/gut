@@ -125,6 +125,8 @@ Request shape:
 
 Clients must treat the three mode identifiers as semantic API values. Display wording can be localized or changed independently.
 
+Commit placement supports histories containing merge commits and preserves their topology. `target` must identify a non-merge ancestor of HEAD, including a commit on a merged side branch. A merge commit itself is rejected as an ambiguous placement target. Failed rewrites automatically return to the original HEAD and restore working-tree/index state before returning an error.
+
 ## Operation history and undo
 
 ### List operations

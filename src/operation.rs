@@ -100,6 +100,10 @@ pub fn begin(kind: OperationKind, target: Option<String>) -> Result<PendingOpera
 }
 
 impl PendingOperation {
+    pub fn recovery_ref(&self) -> &str {
+        &self.before_ref
+    }
+
     pub fn finish(self) -> Result<OperationRecord, String> {
         let head_after = git_output(&["rev-parse", "HEAD"])?;
         let head_after = head_after.trim().to_owned();
