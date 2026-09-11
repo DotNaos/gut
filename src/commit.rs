@@ -27,6 +27,7 @@ pub struct CommitPlacementResult {
     pub target_before: String,
     pub head_before: String,
     pub head_after: String,
+    pub operation_id: String,
 }
 
 impl Placement {
@@ -49,7 +50,7 @@ pub fn place_current_changes(
     message: Option<&str>,
     quiet: bool,
 ) -> Result<CommitPlacementResult, String> {
-    let (target_input, mode, operation) = match &placement {
+    let (target_input, mode, placement_kind) = match &placement {
         Placement::Update(target) => (target.as_str(), "update", PlacementKind::Update),
         Placement::Before(target) => (target.as_str(), "before", PlacementKind::Before),
         Placement::After(target) => (target.as_str(), "after", PlacementKind::After),
@@ -77,47 +78,64 @@ pub fn place_current_changes(
         return Err("there are no changes to commit".to_owned());
     }
 
-    match placement {
-        Placement::Update(_) => {
-            let mut commit = Command::new("git");
-            commit.args(["commit", "--fixup", &target]);
-            run_git_command(&mut commit, "commit", quiet)?;
-            let mut rebase = Command::new("git");
-            rebase.args(["rebase", "--interactive", "--autosquash"]);
-            add_rebase_base(&mut rebase, &target)?;
-            rebase.env("GIT_SEQUENCE_EDITOR", ":");
-            run_git_command(&mut rebase, "history rewrite", quiet)?;
-        }
-        Placement::Before(_) | Placement::After(_) => {
-            let mut commit = Command::new("git");
-            commit.arg("commit");
-            if let Some(message) = message {
-                commit.args(["-m", message]);
+    let operation_kind = match placement_kind {
+        PlacementKind::Update => crate::operation::OperationKind::Update,
+        PlacementKind::Before => crate::operation::OperationKind::Before,
+        PlacementKind::After => crate::operation::OperationKind::After,
+    };
+    let pending = crate::operation::begin(operation_kind, Some(target.clone()))?;
+
+    let rewrite = (|| -> Result<(), String> {
+        match placement {
+            Placement::Update(_) => {
+                let mut commit = Command::new("git");
+                commit.args(["commit", "--fixup", &target]);
+                run_git_command(&mut commit, "commit", quiet)?;
+                let mut rebase = Command::new("git");
+                rebase.args(["rebase", "--interactive", "--autosquash"]);
+                add_rebase_base(&mut rebase, &target)?;
+                rebase.env("GIT_SEQUENCE_EDITOR", ":");
+                run_git_command(&mut rebase, "history rewrite", quiet)?;
             }
-            run_git_command(&mut commit, "commit", quiet)?;
+            Placement::Before(_) | Placement::After(_) => {
+                let mut commit = Command::new("git");
+                commit.arg("commit");
+                if let Some(message) = message {
+                    commit.args(["-m", message]);
+                }
+                run_git_command(&mut commit, "commit", quiet)?;
 
-            let inserted = git_output(&["rev-parse", "HEAD"])?;
-            let inserted = inserted.trim().to_owned();
-            let editor = sequence_editor_command()?;
+                let inserted = git_output(&["rev-parse", "HEAD"])?;
+                let inserted = inserted.trim().to_owned();
+                let editor = sequence_editor_command()?;
 
-            let mut rebase = Command::new("git");
-            rebase.args(["rebase", "--interactive"]);
-            add_rebase_base(&mut rebase, &target)?;
-            rebase
-                .env("GIT_SEQUENCE_EDITOR", editor)
-                .env("GUT_SEQUENCE_MODE", mode)
-                .env("GUT_SEQUENCE_TARGET", &target)
-                .env("GUT_SEQUENCE_INSERT", &inserted);
-            run_git_command(&mut rebase, "history rewrite", quiet)?;
+                let mut rebase = Command::new("git");
+                rebase.args(["rebase", "--interactive"]);
+                add_rebase_base(&mut rebase, &target)?;
+                rebase
+                    .env("GIT_SEQUENCE_EDITOR", editor)
+                    .env("GUT_SEQUENCE_MODE", mode)
+                    .env("GUT_SEQUENCE_TARGET", &target)
+                    .env("GUT_SEQUENCE_INSERT", &inserted);
+                run_git_command(&mut rebase, "history rewrite", quiet)?;
+            }
         }
+        Ok(())
+    })();
+
+    if let Err(error) = rewrite {
+        pending.abort();
+        return Err(error);
     }
 
+    let operation_record = pending.finish()?;
     let head_after = git_output(&["rev-parse", "HEAD"])?;
     Ok(CommitPlacementResult {
-        operation,
+        operation: placement_kind,
         target_before: target,
         head_before: original_head,
         head_after: head_after.trim().to_owned(),
+        operation_id: operation_record.id,
     })
 }
 
