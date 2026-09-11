@@ -79,6 +79,9 @@ fn review_json_describes_full_branch_against_merge_base() {
     assert_eq!(value["data"]["base"], merge_base);
     assert_eq!(value["data"]["mergeBase"], merge_base);
     assert_eq!(value["data"]["head"], head);
+    assert_eq!(value["data"]["branch"], "feature");
+    assert!(value["data"]["patch"].as_str().unwrap().contains("D.txt"));
+    assert!(value["data"]["stat"].as_str().unwrap().contains("D.txt"));
     assert_eq!(
         value["data"]["commits"]
             .as_array()
@@ -97,6 +100,17 @@ fn review_json_describes_full_branch_against_merge_base() {
             .collect::<Vec<_>>(),
         ["D.txt", "E.txt", "F.txt"]
     );
+    for file in value["data"]["files"].as_array().unwrap() {
+        assert_eq!(file["additions"], 1);
+        assert_eq!(file["deletions"], 0);
+        let hunks = file["hunks"].as_array().expect("hunks");
+        assert_eq!(hunks.len(), 1);
+        assert!(hunks[0]["header"].as_str().unwrap().starts_with("@@ "));
+        assert_eq!(hunks[0]["oldStart"], 0);
+        assert_eq!(hunks[0]["oldLines"], 0);
+        assert_eq!(hunks[0]["newStart"], 1);
+        assert_eq!(hunks[0]["newLines"], 1);
+    }
 }
 
 #[test]
@@ -108,4 +122,26 @@ fn review_default_shows_full_branch_patch() {
     assert!(stdout.contains("D.txt"));
     assert!(stdout.contains("E.txt"));
     assert!(stdout.contains("F.txt"));
+}
+
+#[test]
+fn focused_review_views_render_from_the_same_model() {
+    let repo = repo();
+
+    let stat = String::from_utf8(gut(&repo, &["review", "--base", "main", "--stat"]).stdout)
+        .expect("utf8 stat");
+    assert!(stat.contains("D.txt"));
+    assert!(stat.contains("3 files changed"));
+
+    let commits = String::from_utf8(gut(&repo, &["review", "--base", "main", "--commits"]).stdout)
+        .expect("utf8 commits");
+    assert!(commits.contains(" D"));
+    assert!(commits.contains(" E"));
+    assert!(commits.contains(" F"));
+
+    let files = String::from_utf8(gut(&repo, &["review", "--base", "main", "--files"]).stdout)
+        .expect("utf8 files");
+    assert!(files.contains("A\tD.txt"));
+    assert!(files.contains("A\tE.txt"));
+    assert!(files.contains("A\tF.txt"));
 }
