@@ -156,6 +156,8 @@ The runtime also emits versioned event lines when observed state changes:
 
 The default repository polling interval is 200 ms. Use `gut runtime --watch-interval-ms 0` to disable events and keep request/response handling only. Protocol errors are returned as response objects and do not terminate the runtime.
 
+The stable editor/UI contract, including drag-and-drop placement semantics and ownership boundaries, is documented in [`docs/editor-integration.md`](docs/editor-integration.md). Clients can call `runtime.describe` to discover the protocol version, methods, events, and supported commit-placement modes.
+
 ## Shell completion
 
 Generate completions directly:
