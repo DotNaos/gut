@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 use serde::Serialize;
 
 mod commit;
@@ -306,11 +306,7 @@ curl -fsSL "https://raw.githubusercontent.com/DotNaos/gut/$commit/install.sh" | 
 
 fn branches(remote: &str, main: &str, local: bool) -> Result<Vec<String>, String> {
     if local {
-        let output = git_output(&[
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "refs/heads/",
-        ])?;
+        let output = git_output(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"])?;
 
         return Ok(output
             .lines()
