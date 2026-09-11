@@ -6,10 +6,11 @@ use std::{
 };
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 use serde::Serialize;
 
 mod commit;
+mod review;
 
 #[derive(Parser)]
 #[command(name = "gut", version, about = "Good Git: small Git helpers")]
@@ -86,6 +87,21 @@ enum Commands {
         /// List local branches instead of remote branches.
         #[arg(long)]
         local: bool,
+    },
+
+    /// Review the current branch against its base.
+    Review {
+        #[arg(long, default_value = "origin/main")]
+        base: String,
+
+        #[arg(long, conflicts_with_all = ["commits", "files"])]
+        stat: bool,
+
+        #[arg(long, conflicts_with_all = ["stat", "files"])]
+        commits: bool,
+
+        #[arg(long, conflicts_with_all = ["stat", "commits"])]
+        files: bool,
     },
 
     /// Diff a remote branch against the merge-base with main.
@@ -202,6 +218,33 @@ fn run() -> Result<ExitCode, String> {
             print_list(cli.format, "BRANCHES", "branches", &branches)?;
             Ok(ExitCode::SUCCESS)
         }
+        Commands::Review {
+            base,
+            stat,
+            commits,
+            files,
+        } => {
+            if matches!(cli.format, OutputFormat::Json) {
+                let output = review::inspect(&base)?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&JsonEnvelope {
+                        schema_version: 1,
+                        data: output,
+                    })
+                    .map_err(|error| error.to_string())?
+                );
+            } else if stat {
+                review::show_stat(&base)?;
+            } else if commits {
+                review::show_commits(&base)?;
+            } else if files {
+                review::show_files(&base)?;
+            } else {
+                review::show_patch(&base)?;
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         Commands::Diff {
             branch,
             remote,
@@ -263,11 +306,7 @@ curl -fsSL "https://raw.githubusercontent.com/DotNaos/gut/$commit/install.sh" | 
 
 fn branches(remote: &str, main: &str, local: bool) -> Result<Vec<String>, String> {
     if local {
-        let output = git_output(&[
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "refs/heads/",
-        ])?;
+        let output = git_output(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"])?;
 
         return Ok(output
             .lines()
