@@ -48,9 +48,11 @@ struct OperationParams {
 }
 
 type SharedStdout = Arc<Mutex<io::Stdout>>;
+type SharedCore = Arc<Mutex<()>>;
 
 pub fn run(watch_interval_ms: u64) -> Result<(), String> {
     let stdout = Arc::new(Mutex::new(io::stdout()));
+    let core = Arc::new(Mutex::new(()));
     let stop = Arc::new(AtomicBool::new(false));
     let watcher = if watch_interval_ms == 0 {
         None
@@ -61,6 +63,7 @@ pub fn run(watch_interval_ms: u64) -> Result<(), String> {
             .and_then(|records| records.first().map(|record| record.id.clone()));
         Some(spawn_watcher(
             stdout.clone(),
+            core.clone(),
             stop.clone(),
             Duration::from_millis(watch_interval_ms),
             initial_repository,
@@ -74,7 +77,7 @@ pub fn run(watch_interval_ms: u64) -> Result<(), String> {
         if line.trim().is_empty() {
             continue;
         }
-        handle_line(&stdout, &line)?;
+        handle_line(&stdout, &core, &line)?;
     }
 
     stop.store(true, Ordering::Relaxed);
@@ -87,7 +90,7 @@ pub fn run(watch_interval_ms: u64) -> Result<(), String> {
     Ok(())
 }
 
-fn handle_line(stdout: &SharedStdout, line: &str) -> Result<(), String> {
+fn handle_line(stdout: &SharedStdout, core: &SharedCore, line: &str) -> Result<(), String> {
     let request = match serde_json::from_str::<Request>(line) {
         Ok(request) => request,
         Err(error) => {
@@ -103,7 +106,13 @@ fn handle_line(stdout: &SharedStdout, line: &str) -> Result<(), String> {
     };
 
     let id = request.id.clone();
-    let response = match dispatch(&request.method, request.params) {
+    let result = {
+        let _guard = core
+            .lock()
+            .map_err(|_| "runtime core lock was poisoned".to_owned())?;
+        dispatch(&request.method, request.params)
+    };
+    let response = match result {
         Ok(result) => json!({
             "schemaVersion": 1,
             "id": id,
@@ -120,6 +129,27 @@ fn handle_line(stdout: &SharedStdout, line: &str) -> Result<(), String> {
 
 fn dispatch(method: &str, params: Value) -> Result<Value, String> {
     match method {
+        "runtime.describe" => Ok(json!({
+            "protocolVersion": 1,
+            "transport": "ndjson-stdio",
+            "methods": [
+                "runtime.describe",
+                "repository.get",
+                "status.get",
+                "log.get",
+                "review.get",
+                "commit.place",
+                "operation.log",
+                "operation.diff",
+                "operation.undo"
+            ],
+            "events": [
+                "repository.changed",
+                "workingTree.changed",
+                "operation.completed"
+            ],
+            "commitPlacementModes": ["before", "update", "after"]
+        })),
         "repository.get" => to_value(repository::inspect()?),
         "status.get" => {
             let params: StatusParams = decode_default(params)?;
@@ -187,6 +217,7 @@ fn to_value<T: serde::Serialize>(value: T) -> Result<Value, String> {
 
 fn spawn_watcher(
     stdout: SharedStdout,
+    core: SharedCore,
     stop: Arc<AtomicBool>,
     interval: Duration,
     mut previous_repository: Option<repository::RepositoryState>,
@@ -199,7 +230,14 @@ fn spawn_watcher(
                 break;
             }
 
-            if let Ok(next) = repository::inspect() {
+            let (next_repository, records) = {
+                let Ok(_guard) = core.lock() else {
+                    return;
+                };
+                (repository::inspect().ok(), operation::log().ok())
+            };
+
+            if let Some(next) = next_repository {
                 if let Some(previous) = previous_repository.as_ref() {
                     if (previous.root != next.root
                         || previous.branch != next.branch
@@ -217,7 +255,7 @@ fn spawn_watcher(
                 previous_repository = Some(next);
             }
 
-            if let Ok(records) = operation::log() {
+            if let Some(records) = records {
                 let mut new_records = Vec::new();
                 for record in &records {
                     if previous_operation.as_deref() == Some(record.id.as_str()) {

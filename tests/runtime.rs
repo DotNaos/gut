@@ -147,6 +147,10 @@ fn runtime_keeps_one_process_for_queries_mutations_and_events() {
     assert_eq!(review["result"]["commits"][0]["subject"], "B");
 
     let place = responses.get("place").expect("placement response");
+    assert!(
+        place.get("error").is_none(),
+        "placement response: {place:#?}"
+    );
     assert_eq!(place["result"]["operation"], "after");
     let operation_id = place["result"]["operationId"]
         .as_str()
@@ -189,6 +193,10 @@ fn runtime_reports_protocol_errors_without_exiting() {
         .expect("spawn runtime");
     let mut stdin = child.stdin.take().expect("runtime stdin");
 
+    send(
+        &mut stdin,
+        json!({"id":"describe","method":"runtime.describe"}),
+    );
     send(&mut stdin, json!({"id":"bad","method":"does.not.exist"}));
     send(&mut stdin, json!({"id":"good","method":"repository.get"}));
     drop(stdin);
@@ -201,6 +209,46 @@ fn runtime_reports_protocol_errors_without_exiting() {
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect::<Vec<_>>();
     let responses = responses_by_id(&lines);
+    let describe = responses["describe"]["result"]
+        .as_object()
+        .expect("descriptor");
+    assert_eq!(describe["protocolVersion"], 1);
+    assert_eq!(describe["transport"], "ndjson-stdio");
+    assert_eq!(
+        describe["commitPlacementModes"],
+        json!(["before", "update", "after"])
+    );
+    for method in [
+        "review.get",
+        "log.get",
+        "commit.place",
+        "operation.log",
+        "operation.diff",
+        "operation.undo",
+    ] {
+        assert!(
+            describe["methods"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == method),
+            "missing method {method}"
+        );
+    }
+    for event in [
+        "repository.changed",
+        "workingTree.changed",
+        "operation.completed",
+    ] {
+        assert!(
+            describe["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == event),
+            "missing event {event}"
+        );
+    }
     assert!(
         responses["bad"]["error"]["message"]
             .as_str()
