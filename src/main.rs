@@ -79,10 +79,21 @@ enum Commands {
         /// Build and persist a non-mutating rewrite plan instead of applying it.
         #[arg(long)]
         plan: bool,
+
+        /// Reject if the repository state token differs before the operation starts.
+        #[arg(long, value_name = "TOKEN")]
+        expected_state: Option<String>,
+
+        /// Reject if HEAD differs before the operation starts.
+        #[arg(long, value_name = "COMMIT")]
+        expected_head: Option<String>,
     },
 
     /// Inspect staged, unstaged, and untracked changes with stable file/hunk IDs.
     Changes,
+
+    /// Show the current local repository state and optimistic-concurrency token.
+    Repository,
 
     /// Apply a previously created commit-placement plan after verifying repository state.
     Apply { plan: String },
@@ -181,7 +192,15 @@ enum OpCommands {
     Diff { operation: String },
 
     /// Restore the state from before an operation. Defaults to the latest operation on this branch.
-    Undo { operation: Option<String> },
+    Undo {
+        operation: Option<String>,
+
+        #[arg(long, value_name = "TOKEN")]
+        expected_state: Option<String>,
+
+        #[arg(long, value_name = "COMMIT")]
+        expected_head: Option<String>,
+    },
 }
 
 #[derive(Clone, Serialize)]
@@ -241,10 +260,17 @@ fn run() -> Result<ExitCode, String> {
             files,
             hunks,
             plan: plan_only,
+            expected_state,
+            expected_head,
         } => {
             let placement = commit::Placement::from_args(update, before, after)?;
             let selection = changes::Selection { files, hunks };
+            let guard = repository::MutationGuard {
+                expected_state,
+                expected_head,
+            };
             if plan_only {
+                repository::check_guard(&guard).map_err(|mismatch| mismatch.message())?;
                 let output = plan::create(&placement, message.as_deref(), &selection)?;
                 if matches!(format, OutputFormat::Json) {
                     println!(
@@ -264,6 +290,7 @@ fn run() -> Result<ExitCode, String> {
                     message.as_deref(),
                     matches!(format, OutputFormat::Json),
                     &selection,
+                    &guard,
                 )?;
                 if matches!(format, OutputFormat::Json) {
                     println!(
@@ -295,6 +322,34 @@ fn run() -> Result<ExitCode, String> {
                         println!("{}", file.path);
                     }
                 }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Repository => {
+            let output = repository::inspect()?;
+            match format {
+                OutputFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&JsonEnvelope {
+                        schema_version: 1,
+                        data: output,
+                    })
+                    .map_err(|error| error.to_string())?
+                ),
+                OutputFormat::Human => {
+                    println!(
+                        "branch: {}",
+                        output.branch.as_deref().unwrap_or("(detached)")
+                    );
+                    println!("head: {}", output.head);
+                    println!("state: {}", output.state_token);
+                    println!("dirty: {}", output.dirty);
+                }
+                OutputFormat::Plain => {
+                    println!("head\t{}", output.head);
+                    println!("state\t{}", output.state_token);
+                }
+                OutputFormat::Values => println!("{}", output.state_token),
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -459,8 +514,16 @@ fn run() -> Result<ExitCode, String> {
                         operation::show_diff(&id)?;
                     }
                 }
-                OpCommands::Undo { operation: id } => {
-                    let output = operation::undo(id.as_deref())?;
+                OpCommands::Undo {
+                    operation: id,
+                    expected_state,
+                    expected_head,
+                } => {
+                    let guard = repository::MutationGuard {
+                        expected_state,
+                        expected_head,
+                    };
+                    let output = operation::undo(id.as_deref(), &guard)?;
                     if matches!(format, OutputFormat::Json) {
                         println!(
                             "{}",

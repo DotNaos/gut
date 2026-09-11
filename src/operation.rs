@@ -155,7 +155,11 @@ pub fn show_diff(id: &str) -> Result<(), String> {
     }
 }
 
-pub fn undo(id: Option<&str>) -> Result<OperationRecord, String> {
+pub fn undo(
+    id: Option<&str>,
+    guard: &crate::repository::MutationGuard,
+) -> Result<OperationRecord, String> {
+    crate::repository::check_guard(guard).map_err(|mismatch| mismatch.message())?;
     require_clean_worktree()?;
     let branch = current_branch()?;
     let records = read_records()?;

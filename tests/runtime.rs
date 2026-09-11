@@ -223,6 +223,10 @@ fn runtime_reports_protocol_errors_without_exiting() {
         describe["commitPlacementModes"],
         json!(["before", "update", "after"])
     );
+    assert_eq!(
+        describe["mutationGuards"],
+        json!(["expectedState", "expectedHead"])
+    );
     for method in [
         "review.get",
         "changes.get",
