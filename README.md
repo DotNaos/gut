@@ -27,6 +27,7 @@ gut op undo [operation]
 gut branches
 gut diff <branch>
 gut worktrees
+gut runtime
 gut completions <shell>
 ```
 
@@ -119,6 +120,41 @@ gut op log --format json
 gut op diff <operation> --format json
 gut op undo <operation> --format json
 ```
+
+## Editor runtime
+
+`gut runtime` keeps one local process alive for editor and UI integrations. It uses newline-delimited JSON over stdin/stdout and calls the same core operations as the CLI.
+
+Example request and response:
+
+```json
+{"id":"review-1","method":"review.get","params":{"base":"main"}}
+{"schemaVersion":1,"id":"review-1","result":{"branch":"feature"}}
+```
+
+Supported query methods:
+
+- `repository.get`
+- `status.get`
+- `log.get`
+- `review.get`
+- `operation.log`
+- `operation.diff`
+
+Supported mutation methods:
+
+- `commit.place` with `mode` = `before`, `update`, or `after`
+- `operation.undo`
+
+The runtime also emits versioned event lines when observed state changes:
+
+```json
+{"schemaVersion":1,"event":"repository.changed","data":{}}
+{"schemaVersion":1,"event":"workingTree.changed","data":{}}
+{"schemaVersion":1,"event":"operation.completed","data":{}}
+```
+
+The default repository polling interval is 200 ms. Use `gut runtime --watch-interval-ms 0` to disable events and keep request/response handling only. Protocol errors are returned as response objects and do not terminate the runtime.
 
 ## Shell completion
 

@@ -12,7 +12,9 @@ use serde::Serialize;
 mod commit;
 mod log;
 mod operation;
+mod repository;
 mod review;
+mod runtime;
 
 #[derive(Parser)]
 #[command(name = "gut", version, about = "Good Git: small Git helpers")]
@@ -132,6 +134,13 @@ enum Commands {
 
     /// Show registered worktrees as clean or dirty.
     Worktrees,
+
+    /// Run the persistent editor-facing stdio runtime.
+    Runtime {
+        /// Poll interval for repository change events. Use 0 to disable events.
+        #[arg(long, default_value_t = 200)]
+        watch_interval_ms: u64,
+    },
 
     /// Upgrade gut from source using the install script.
     Upgrade,
@@ -420,6 +429,10 @@ fn run() -> Result<ExitCode, String> {
         Commands::Worktrees => {
             let status = worktree_status()?;
             print_worktrees(format, &status)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Runtime { watch_interval_ms } => {
+            runtime::run(watch_interval_ms)?;
             Ok(ExitCode::SUCCESS)
         }
         Commands::Upgrade => upgrade(),
