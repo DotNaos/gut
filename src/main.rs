@@ -10,6 +10,7 @@ use clap_complete::{Shell, generate};
 use serde::Serialize;
 
 mod commit;
+mod operation;
 mod review;
 
 #[derive(Parser)]
@@ -104,6 +105,12 @@ enum Commands {
         files: bool,
     },
 
+    /// Inspect or restore gut operation history.
+    Op {
+        #[command(subcommand)]
+        command: OpCommands,
+    },
+
     /// Diff a remote branch against the merge-base with main.
     Diff {
         branch: String,
@@ -126,6 +133,18 @@ enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+}
+
+#[derive(Subcommand)]
+enum OpCommands {
+    /// List recorded mutating gut operations, newest first.
+    Log,
+
+    /// Show the repository diff produced by an operation.
+    Diff { operation: String },
+
+    /// Restore the state from before an operation. Defaults to the latest operation on this branch.
+    Undo { operation: Option<String> },
 }
 
 #[derive(Clone, Serialize)]
@@ -242,6 +261,97 @@ fn run() -> Result<ExitCode, String> {
                 review::show_files(&base)?;
             } else {
                 review::show_patch(&base)?;
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Op { command } => {
+            match command {
+                OpCommands::Log => {
+                    let records = operation::log()?;
+                    if matches!(cli.format, OutputFormat::Json) {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&JsonEnvelope {
+                                schema_version: 1,
+                                data: records,
+                            })
+                            .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        for record in records {
+                            match cli.format {
+                                OutputFormat::Human => {
+                                    let target = record
+                                        .target
+                                        .as_deref()
+                                        .map(|target| format!(" target={target}"))
+                                        .unwrap_or_default();
+                                    println!(
+                                        "{}  {}  {}  {} -> {}{}",
+                                        record.id,
+                                        record.kind.as_str(),
+                                        record.branch,
+                                        record.head_before,
+                                        record.head_after,
+                                        target
+                                    );
+                                }
+                                OutputFormat::Plain => println!(
+                                    "{}\t{}\t{}\t{}\t{}\t{}",
+                                    record.id,
+                                    record.kind.as_str(),
+                                    record.branch,
+                                    record.head_before,
+                                    record.head_after,
+                                    record.target.as_deref().unwrap_or("")
+                                ),
+                                OutputFormat::Values => println!("{}", record.id),
+                                OutputFormat::Json => unreachable!(),
+                            }
+                        }
+                    }
+                }
+                OpCommands::Diff { operation: id } => {
+                    if matches!(cli.format, OutputFormat::Json) {
+                        let output = operation::diff(&id)?;
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&JsonEnvelope {
+                                schema_version: 1,
+                                data: output,
+                            })
+                            .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        operation::show_diff(&id)?;
+                    }
+                }
+                OpCommands::Undo { operation: id } => {
+                    let output = operation::undo(id.as_deref())?;
+                    if matches!(cli.format, OutputFormat::Json) {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&JsonEnvelope {
+                                schema_version: 1,
+                                data: output,
+                            })
+                            .map_err(|error| error.to_string())?
+                        );
+                    } else {
+                        match cli.format {
+                            OutputFormat::Human => println!(
+                                "restored {} -> {} (operation {})",
+                                output.head_before, output.head_after, output.id
+                            ),
+                            OutputFormat::Plain => println!(
+                                "{}\t{}\t{}",
+                                output.id, output.head_before, output.head_after
+                            ),
+                            OutputFormat::Values => println!("{}", output.id),
+                            OutputFormat::Json => unreachable!(),
+                        }
+                    }
+                }
             }
             Ok(ExitCode::SUCCESS)
         }

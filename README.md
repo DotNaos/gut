@@ -20,6 +20,9 @@ gut commit --before <commit> -m "message"
 gut commit --after <commit> -m "message"
 gut status
 gut review
+gut op log
+gut op diff <operation>
+gut op undo [operation]
 gut branches
 gut diff <branch>
 gut worktrees
@@ -29,6 +32,8 @@ gut completions <shell>
 `gut commit` places all current changes at a specific point in linear local history. `--update` adds them to an existing commit; `--before` and `--after` create a new commit around the selected commit and rewrite descendants automatically.
 
 `gut review` shows the full current-branch diff against the merge-base with `origin/main`. Use `--base <ref>` for another base, or `--stat`, `--commits`, and `--files` for focused human-readable views. With `--format json`, it returns the resolved base, merge-base, HEAD, commits, and changed files as structured data.
+
+History-editing operations are recorded locally by `gut`. `gut op log` lists them, `gut op diff <operation>` shows the exact before/after diff, and `gut op undo [operation]` restores the state from before an operation. Undo requires a clean working tree and never pushes or rewrites a remote. Gut keeps before/after Git refs for recorded operations so rewritten commits remain reachable locally.
 
 `gut status` is the combined overview: it checks whether each remote branch would still change `origin/main`, and whether registered worktrees are clean or dirty.
 
@@ -87,9 +92,18 @@ gut commit --update <commit> --format json
     "operation": "update",
     "targetBefore": "<commit>",
     "headBefore": "<commit>",
-    "headAfter": "<commit>"
+    "headAfter": "<commit>",
+    "operationId": "op-..."
   }
 }
+```
+
+Operation history also uses the same versioned JSON envelope:
+
+```sh
+gut op log --format json
+gut op diff <operation> --format json
+gut op undo <operation> --format json
 ```
 
 ## Shell completion
