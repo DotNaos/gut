@@ -84,6 +84,7 @@ fn runtime_keeps_one_process_for_queries_mutations_and_events() {
     let mut stdin = child.stdin.take().expect("runtime stdin");
 
     send(&mut stdin, json!({"id":"repo","method":"repository.get"}));
+    send(&mut stdin, json!({"id":"changes","method":"changes.get"}));
     send(
         &mut stdin,
         json!({"id":"status","method":"status.get","params":{"local":true}}),
@@ -98,7 +99,7 @@ fn runtime_keeps_one_process_for_queries_mutations_and_events() {
         json!({
             "id":"place",
             "method":"commit.place",
-            "params":{"mode":"after","target":original_head,"message":"X"}
+            "params":{"mode":"after","target":original_head,"message":"X","files":["runtime-change.txt"]}
         }),
     );
 
@@ -134,6 +135,10 @@ fn runtime_keeps_one_process_for_queries_mutations_and_events() {
     assert_eq!(repo_response["result"]["branch"], "feature");
     assert_eq!(repo_response["result"]["head"], original_head);
     assert_eq!(repo_response["result"]["dirty"], true);
+
+    let changes = responses.get("changes").expect("changes response");
+    assert_eq!(changes["result"]["files"][0]["path"], "runtime-change.txt");
+    assert_eq!(changes["result"]["files"][0]["untracked"], true);
 
     let status = responses.get("status").expect("status response");
     assert!(status["result"]["branches"]["would_change_main"].is_array());
@@ -220,6 +225,7 @@ fn runtime_reports_protocol_errors_without_exiting() {
     );
     for method in [
         "review.get",
+        "changes.get",
         "log.get",
         "commit.place",
         "operation.log",

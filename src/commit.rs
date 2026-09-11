@@ -50,6 +50,7 @@ pub fn place_current_changes(
     placement: Placement,
     message: Option<&str>,
     quiet: bool,
+    selection: &crate::changes::Selection,
 ) -> Result<CommitPlacementResult, String> {
     let (target_input, mode, placement_kind) = match &placement {
         Placement::Update(target) => (target.as_str(), "update", PlacementKind::Update),
@@ -74,18 +75,51 @@ pub fn place_current_changes(
     require_ancestor(&target, &original_head)?;
     require_supported_target(&target)?;
     let preserve_merges = history_contains_merges(&target, &original_head)?;
-    let index_snapshot = IndexSnapshot::capture()?;
 
-    if let Err(error) = git(&["add", "-A"]) {
-        if let Err(restore_error) = index_snapshot.restore() {
+    let selective = if selection.is_empty() {
+        None
+    } else {
+        let state = crate::changes::prepare_selection(selection)?;
+        if state.original_head() != original_head {
+            return Err("repository HEAD changed while preparing selected changes".to_owned());
+        }
+        if let Err(error) = state.isolate_selected() {
+            return match state.restore_original() {
+                Ok(()) => Err(error),
+                Err(restore_error) => Err(format!(
+                    "{error}; failed to restore original change state: {restore_error}"
+                )),
+            };
+        }
+        state.preflight_residual()?;
+        Some(state)
+    };
+
+    let index_snapshot = if selective.is_none() {
+        Some(IndexSnapshot::capture()?)
+    } else {
+        None
+    };
+
+    if selective.is_none()
+        && let Err(error) = git(&["add", "-A"])
+    {
+        if let Some(snapshot) = &index_snapshot
+            && let Err(restore_error) = snapshot.restore()
+        {
             return Err(format!(
                 "{error}; failed to restore Git index: {restore_error}"
             ));
         }
         return Err(error);
     }
+
     if git_status(&["diff", "--cached", "--quiet"])? {
-        index_snapshot.restore()?;
+        if let Some(state) = &selective {
+            state.restore_original()?;
+        } else if let Some(snapshot) = &index_snapshot {
+            snapshot.restore()?;
+        }
         return Err("there are no changes to commit".to_owned());
     }
 
@@ -97,7 +131,15 @@ pub fn place_current_changes(
     let pending = match crate::operation::begin(operation_kind, Some(target.clone())) {
         Ok(pending) => pending,
         Err(error) => {
-            if let Err(restore_error) = index_snapshot.restore() {
+            if let Some(state) = &selective {
+                if let Err(restore_error) = state.restore_original() {
+                    return Err(format!(
+                        "{error}; failed to restore original change state: {restore_error}"
+                    ));
+                }
+            } else if let Some(snapshot) = &index_snapshot
+                && let Err(restore_error) = snapshot.restore()
+            {
                 return Err(format!(
                     "{error}; failed to restore Git index: {restore_error}"
                 ));
@@ -153,7 +195,17 @@ pub fn place_current_changes(
     })();
 
     if let Err(error) = rewrite {
-        if let Err(rollback_error) = rollback_failed_rewrite(&original_head, &index_snapshot) {
+        let rollback = if let Some(state) = &selective {
+            state.restore_original()
+        } else {
+            rollback_failed_rewrite(
+                &original_head,
+                index_snapshot
+                    .as_ref()
+                    .ok_or_else(|| "missing index rollback snapshot".to_owned())?,
+            )
+        };
+        if let Err(rollback_error) = rollback {
             return Err(format!(
                 "{error}; automatic rollback failed: {rollback_error}; original HEAD is protected at {}",
                 pending.recovery_ref()
@@ -161,6 +213,25 @@ pub fn place_current_changes(
         }
         pending.abort();
         return Err(error);
+    }
+
+    if let Some(state) = &selective
+        && let Err(error) = state.restore_residual()
+    {
+        match state.restore_original() {
+            Ok(()) => {
+                pending.abort();
+                return Err(format!(
+                    "history rewrite succeeded but remaining changes could not be restored; the rewrite was rolled back: {error}"
+                ));
+            }
+            Err(rollback_error) => {
+                return Err(format!(
+                    "history rewrite succeeded but remaining changes could not be restored: {error}; rollback failed: {rollback_error}; original HEAD is protected at {}",
+                    pending.recovery_ref()
+                ));
+            }
+        }
     }
 
     let operation_record = pending.finish()?;

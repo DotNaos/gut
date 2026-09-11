@@ -18,6 +18,7 @@ Requires `git` and Rust/Cargo.
 gut commit --update <commit>
 gut commit --before <commit> -m "message"
 gut commit --after <commit> -m "message"
+gut changes
 gut status
 gut review
 gut log
@@ -32,6 +33,14 @@ gut completions <shell>
 ```
 
 `gut commit` places all current changes at a specific point in local history. `--update` adds them to an existing commit; `--before` and `--after` create a new commit around the selected commit and rewrite descendants automatically. Histories containing merges are rewritten with merge topology preserved. The target itself must be a non-merge commit; placement directly relative to a merge commit is rejected as ambiguous.
+
+`gut changes` exposes staged, unstaged, and untracked files with stable file and hunk IDs. Commit placement can select a complete path with `--file <path>` or one or more text hunks with `--hunk <id>`. Non-selected changes keep their staged/unstaged/untracked state. Hunk selection is intentionally limited to modified text files; additions, deletions, binary files, and untracked files are selected as whole files.
+
+```sh
+gut changes --json
+gut commit --update <commit> --hunk h-0123456789abcdef
+gut commit --after <commit> -m "split change" --file src/foo.rs
+```
 
 If a history rewrite conflicts or otherwise fails, `gut` aborts the rewrite and restores the original HEAD, working-tree contents, and Git index. The protected before-state ref is retained if automatic rollback itself cannot complete.
 
