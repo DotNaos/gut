@@ -62,7 +62,9 @@ pub fn place_current_changes(
     message: Option<&str>,
     quiet: bool,
     selection: &crate::changes::Selection,
+    guard: &crate::repository::MutationGuard,
 ) -> Result<CommitPlacementResult, String> {
+    crate::repository::check_guard(guard).map_err(|mismatch| mismatch.message())?;
     let (target_input, mode, placement_kind) = match &placement {
         Placement::Update(target) => (target.as_str(), "update", PlacementKind::Update),
         Placement::Before(target) => (target.as_str(), "before", PlacementKind::Before),

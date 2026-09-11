@@ -19,6 +19,7 @@ gut commit --update <commit>
 gut commit --before <commit> -m "message"
 gut commit --after <commit> -m "message"
 gut changes
+gut repository
 gut apply <plan-id>
 gut status
 gut review
@@ -46,6 +47,13 @@ gut commit --after <commit> -m "split change" --file src/foo.rs
 If a history rewrite conflicts or otherwise fails, `gut` aborts the rewrite and restores the original HEAD, working-tree contents, and Git index. The protected before-state ref is retained if automatic rollback itself cannot complete.
 
 Use `--plan` on any commit-placement command to inspect and persist a non-mutating rewrite plan before applying it. Plans contain the resolved target, branch, HEAD, affected commit topology, merge-preservation flag, selection, and a repository-state token. `gut apply <plan-id>` executes only if the branch and full local state still match the plan.
+
+`gut repository --json` exposes the current `head` and `stateToken`. Mutating commit-placement and undo calls can use `--expected-state <token>` and/or `--expected-head <commit>` for optimistic concurrency. A mismatch is rejected before any Git state is changed. The state token covers branch, HEAD, index, tracked working-tree changes, and untracked file content.
+
+```sh
+state=$(gut repository --format values)
+gut commit --update <commit> --expected-state "$state"
+```
 
 ```sh
 gut commit --update <commit> --hunk <id> --plan --json

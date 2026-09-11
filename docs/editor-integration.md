@@ -97,6 +97,44 @@ The result is the same model as `gut review --json`, including:
 - parsed diff hunks
 - complete stat and patch text
 
+## Repository state and optimistic concurrency
+
+`repository.get` returns `branch`, `head`, `stateToken`, dirty state, and the porcelain worktree view. `stateToken` changes when the branch, HEAD, index, tracked working tree, or untracked file contents change.
+
+Mutating requests accept optional `expectedState` and `expectedHead`. Editors should pass the values from the state they rendered:
+
+```json
+{
+  "id":"place",
+  "method":"commit.place",
+  "params":{
+    "mode":"update",
+    "target":"<commit-id>",
+    "expectedState":"<state-token>",
+    "expectedHead":"<head>"
+  }
+}
+```
+
+If either expectation is stale, the runtime performs no mutation and returns a structured error:
+
+```json
+{
+  "error":{
+    "code":"stale_repository_state",
+    "message":"stale repository state: ...",
+    "data":{
+      "expectedState":"...",
+      "actualState":"...",
+      "expectedHead":"...",
+      "actualHead":"..."
+    }
+  }
+}
+```
+
+`operation.undo` supports the same guards. Stored rewrite plans already contain the state token and HEAD and are always guarded when applied.
+
 ## Working changes and selection
 
 Editors should use `changes.get` (or `gut changes --json`) instead of parsing `git diff`. The result separates staged and unstaged layers per path, marks untracked files, and exposes stable IDs for files and text hunks. Hunk IDs identify the exact layer/path/patch content and therefore change when that hunk changes.

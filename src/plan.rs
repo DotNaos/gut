@@ -128,19 +128,24 @@ pub fn apply(id: &str, quiet: bool) -> Result<CommitPlacementResult, String> {
             branch.trim()
         ));
     }
-    let actual = crate::repository::state_token()?;
-    if actual != plan.state_token {
-        return Err(format!(
-            "stale plan {}: repository state changed (expected {}, actual {})",
-            plan.id, plan.state_token, actual
-        ));
-    }
+    let guard = crate::repository::MutationGuard {
+        expected_state: Some(plan.state_token.clone()),
+        expected_head: Some(plan.head_before.clone()),
+    };
+    crate::repository::check_guard(&guard)
+        .map_err(|mismatch| format!("stale plan {}: {}", plan.id, mismatch.message()))?;
     let placement = match plan.operation {
         PlacementKind::Update => Placement::Update(plan.target_before.clone()),
         PlacementKind::Before => Placement::Before(plan.target_before.clone()),
         PlacementKind::After => Placement::After(plan.target_before.clone()),
     };
-    crate::commit::place_current_changes(placement, plan.message.as_deref(), quiet, &plan.selection)
+    crate::commit::place_current_changes(
+        placement,
+        plan.message.as_deref(),
+        quiet,
+        &plan.selection,
+        &guard,
+    )
 }
 
 pub fn load(id: &str) -> Result<PlacementPlan, String> {

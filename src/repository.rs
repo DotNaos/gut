@@ -5,7 +5,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,8 +13,48 @@ pub struct RepositoryState {
     pub root: String,
     pub branch: Option<String>,
     pub head: String,
+    pub state_token: String,
     pub dirty: bool,
     pub worktree: Vec<String>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutationGuard {
+    pub expected_state: Option<String>,
+    pub expected_head: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StateMismatch {
+    pub expected_state: Option<String>,
+    pub actual_state: String,
+    pub expected_head: Option<String>,
+    pub actual_head: String,
+}
+
+impl StateMismatch {
+    pub fn message(&self) -> String {
+        let mut reasons = Vec::new();
+        if let Some(expected) = &self.expected_head
+            && expected != &self.actual_head
+        {
+            reasons.push(format!(
+                "HEAD expected {expected}, actual {}",
+                self.actual_head
+            ));
+        }
+        if let Some(expected) = &self.expected_state
+            && expected != &self.actual_state
+        {
+            reasons.push(format!(
+                "state expected {expected}, actual {}",
+                self.actual_state
+            ));
+        }
+        format!("stale repository state: {}", reasons.join("; "))
+    }
 }
 
 pub fn inspect() -> Result<RepositoryState, String> {
@@ -25,18 +65,53 @@ pub fn inspect() -> Result<RepositoryState, String> {
     let status = git_output(&["status", "--porcelain=v1"])?;
     let worktree = status.lines().map(str::to_owned).collect::<Vec<_>>();
 
+    let state_token = state_token()?;
     Ok(RepositoryState {
         root: root.trim().to_owned(),
         branch,
         head: head.trim().to_owned(),
+        state_token,
         dirty: !worktree.is_empty(),
         worktree,
     })
 }
 
+pub fn check_guard(guard: &MutationGuard) -> Result<(), StateMismatch> {
+    if guard.expected_state.is_none() && guard.expected_head.is_none() {
+        return Ok(());
+    }
+    let actual_head = git_output(&["rev-parse", "HEAD"])
+        .map(|value| value.trim().to_owned())
+        .unwrap_or_else(|_| "unknown".to_owned());
+    let actual_state = state_token().unwrap_or_else(|_| "unknown".to_owned());
+    let head_matches = guard
+        .expected_head
+        .as_ref()
+        .is_none_or(|expected| expected == &actual_head);
+    let state_matches = guard
+        .expected_state
+        .as_ref()
+        .is_none_or(|expected| expected == &actual_state);
+    if head_matches && state_matches {
+        Ok(())
+    } else {
+        Err(StateMismatch {
+            expected_state: guard.expected_state.clone(),
+            actual_state,
+            expected_head: guard.expected_head.clone(),
+            actual_head,
+        })
+    }
+}
+
 pub fn state_token() -> Result<String, String> {
     let root = PathBuf::from(git_output(&["rev-parse", "--show-toplevel"])?.trim());
     let mut state = Vec::new();
+    state.extend_from_slice(b"BRANCH\0");
+    if let Some(branch) = git_optional(&["symbolic-ref", "--quiet", "--short", "HEAD"])? {
+        state.extend_from_slice(branch.trim().as_bytes());
+    }
+    state.push(0);
     state.extend_from_slice(b"HEAD\0");
     state.extend_from_slice(git_bytes(&["rev-parse", "HEAD"])?.as_slice());
     state.extend_from_slice(b"INDEX\0");
