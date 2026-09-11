@@ -13,6 +13,7 @@ mod changes;
 mod commit;
 mod log;
 mod operation;
+mod plan;
 mod repository;
 mod review;
 mod runtime;
@@ -74,10 +75,17 @@ enum Commands {
         /// Select one stable hunk ID from `gut changes`. Repeatable.
         #[arg(long = "hunk", value_name = "HUNK_ID")]
         hunks: Vec<String>,
+
+        /// Build and persist a non-mutating rewrite plan instead of applying it.
+        #[arg(long)]
+        plan: bool,
     },
 
     /// Inspect staged, unstaged, and untracked changes with stable file/hunk IDs.
     Changes,
+
+    /// Apply a previously created commit-placement plan after verifying repository state.
+    Apply { plan: String },
 
     /// Show branch inclusion state and worktree cleanliness.
     Status {
@@ -232,23 +240,41 @@ fn run() -> Result<ExitCode, String> {
             message,
             files,
             hunks,
+            plan: plan_only,
         } => {
             let placement = commit::Placement::from_args(update, before, after)?;
-            let output = commit::place_current_changes(
-                placement,
-                message.as_deref(),
-                matches!(format, OutputFormat::Json),
-                &changes::Selection { files, hunks },
-            )?;
-            if matches!(format, OutputFormat::Json) {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&JsonEnvelope {
-                        schema_version: 1,
-                        data: output,
-                    })
-                    .map_err(|error| error.to_string())?
-                );
+            let selection = changes::Selection { files, hunks };
+            if plan_only {
+                let output = plan::create(&placement, message.as_deref(), &selection)?;
+                if matches!(format, OutputFormat::Json) {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&JsonEnvelope {
+                            schema_version: 1,
+                            data: output,
+                        })
+                        .map_err(|error| error.to_string())?
+                    );
+                } else {
+                    print_plan(&output);
+                }
+            } else {
+                let output = commit::place_current_changes(
+                    placement,
+                    message.as_deref(),
+                    matches!(format, OutputFormat::Json),
+                    &selection,
+                )?;
+                if matches!(format, OutputFormat::Json) {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&JsonEnvelope {
+                            schema_version: 1,
+                            data: output,
+                        })
+                        .map_err(|error| error.to_string())?
+                    );
+                }
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -269,6 +295,25 @@ fn run() -> Result<ExitCode, String> {
                         println!("{}", file.path);
                     }
                 }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Apply { plan: plan_id } => {
+            let output = plan::apply(&plan_id, matches!(format, OutputFormat::Json))?;
+            match format {
+                OutputFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&JsonEnvelope {
+                        schema_version: 1,
+                        data: output,
+                    })
+                    .map_err(|error| error.to_string())?
+                ),
+                OutputFormat::Human => println!(
+                    "applied {}: {} -> {}",
+                    plan_id, output.head_before, output.head_after
+                ),
+                OutputFormat::Plain | OutputFormat::Values => println!("{}", output.operation_id),
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -820,6 +865,32 @@ fn print_list(
     }
 
     Ok(())
+}
+
+fn print_plan(output: &plan::PlacementPlan) {
+    println!("plan: {}", output.id);
+    println!(
+        "operation: {} {}",
+        output.operation.as_str(),
+        output.target_before
+    );
+    println!("head: {}", output.head_before);
+    println!("state: {}", output.state_token);
+    println!("preserve merges: {}", output.preserve_merges);
+    if output.selection.is_empty() {
+        println!("selection: all current changes");
+    } else {
+        if !output.selection.files.is_empty() {
+            println!("files: {}", output.selection.files.join(", "));
+        }
+        if !output.selection.hunks.is_empty() {
+            println!("hunks: {}", output.selection.hunks.join(", "));
+        }
+    }
+    println!("affected commits:");
+    for commit in &output.affected_commits {
+        println!("  {}  {}", commit.id, commit.subject);
+    }
 }
 
 fn print_changes(output: &changes::ChangesResult) {

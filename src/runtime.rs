@@ -11,7 +11,7 @@ use std::{
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
-use crate::{changes, commit, log, operation, repository, review};
+use crate::{changes, commit, log, operation, plan, repository, review};
 
 #[derive(Deserialize)]
 struct Request {
@@ -44,6 +44,11 @@ struct CommitPlaceParams {
     files: Vec<String>,
     #[serde(default)]
     hunks: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct PlanApplyParams {
+    plan: String,
 }
 
 #[derive(Default, Deserialize)]
@@ -143,7 +148,9 @@ fn dispatch(method: &str, params: Value) -> Result<Value, String> {
                 "status.get",
                 "log.get",
                 "review.get",
+                "commit.plan",
                 "commit.place",
+                "plan.apply",
                 "operation.log",
                 "operation.diff",
                 "operation.undo"
@@ -173,14 +180,21 @@ fn dispatch(method: &str, params: Value) -> Result<Value, String> {
                 params.base.as_deref().unwrap_or("origin/main"),
             )?)
         }
+        "commit.plan" => {
+            let params: CommitPlaceParams = decode(params)?;
+            let placement = placement_from_runtime(&params.mode, params.target)?;
+            to_value(plan::create(
+                &placement,
+                params.message.as_deref(),
+                &changes::Selection {
+                    files: params.files,
+                    hunks: params.hunks,
+                },
+            )?)
+        }
         "commit.place" => {
             let params: CommitPlaceParams = decode(params)?;
-            let placement = match params.mode.as_str() {
-                "update" => commit::Placement::Update(params.target),
-                "before" => commit::Placement::Before(params.target),
-                "after" => commit::Placement::After(params.target),
-                mode => return Err(format!("unsupported commit placement mode: {mode}")),
-            };
+            let placement = placement_from_runtime(&params.mode, params.target)?;
             to_value(commit::place_current_changes(
                 placement,
                 params.message.as_deref(),
@@ -190,6 +204,10 @@ fn dispatch(method: &str, params: Value) -> Result<Value, String> {
                     hunks: params.hunks,
                 },
             )?)
+        }
+        "plan.apply" => {
+            let params: PlanApplyParams = decode(params)?;
+            to_value(plan::apply(&params.plan, true)?)
         }
         "operation.log" => to_value(operation::log()?),
         "operation.diff" => {
@@ -205,6 +223,15 @@ fn dispatch(method: &str, params: Value) -> Result<Value, String> {
             to_value(operation::undo(params.operation.as_deref())?)
         }
         _ => Err(format!("unknown runtime method: {method}")),
+    }
+}
+
+fn placement_from_runtime(mode: &str, target: String) -> Result<commit::Placement, String> {
+    match mode {
+        "update" => Ok(commit::Placement::Update(target)),
+        "before" => Ok(commit::Placement::Before(target)),
+        "after" => Ok(commit::Placement::After(target)),
+        mode => Err(format!("unsupported commit placement mode: {mode}")),
     }
 }
 
