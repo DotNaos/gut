@@ -6,9 +6,10 @@ use std::{
     process::{Command, Stdio},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Selection {
     pub files: Vec<String>,
     pub hunks: Vec<String>,

@@ -139,6 +139,24 @@ Clients must treat the three mode identifiers as semantic API values. Display wo
 
 Commit placement supports histories containing merge commits and preserves their topology. `target` must identify a non-merge ancestor of HEAD, including a commit on a merged side branch. A merge commit itself is rejected as an ambiguous placement target. Failed rewrites automatically return to the original HEAD and restore working-tree/index state before returning an error.
 
+## Rewrite plans
+
+Editors and agents can request a non-mutating plan before history editing:
+
+```json
+{"id":"plan","method":"commit.plan","params":{"mode":"update","target":"<commit-id>","hunks":["h-..."]}}
+```
+
+The plan returns a stable `id`, repository `stateToken`, branch/HEAD/target, affected commits with parent topology, whether merge topology must be preserved, and the exact file/hunk selection. Planning does not change HEAD, refs, index, working tree, or operation history; only the plan document is persisted under Git metadata.
+
+Apply the exact plan with:
+
+```json
+{"id":"apply","method":"plan.apply","params":{"plan":"plan-..."}}
+```
+
+Application is rejected as stale if the branch or repository state changed since planning. Clients must request a new plan rather than silently recalculating the operation.
+
 ## Operation history and undo
 
 ### List operations

@@ -5,9 +5,9 @@ use std::{
     process::{Command, Stdio},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PlacementKind {
     Update,
@@ -15,6 +15,7 @@ pub enum PlacementKind {
     After,
 }
 
+#[derive(Clone)]
 pub enum Placement {
     Update(String),
     Before(String),
@@ -29,6 +30,16 @@ pub struct CommitPlacementResult {
     pub head_before: String,
     pub head_after: String,
     pub operation_id: String,
+}
+
+impl PlacementKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Update => "update",
+            Self::Before => "before",
+            Self::After => "after",
+        }
+    }
 }
 
 impl Placement {

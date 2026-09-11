@@ -19,6 +19,7 @@ gut commit --update <commit>
 gut commit --before <commit> -m "message"
 gut commit --after <commit> -m "message"
 gut changes
+gut apply <plan-id>
 gut status
 gut review
 gut log
@@ -43,6 +44,13 @@ gut commit --after <commit> -m "split change" --file src/foo.rs
 ```
 
 If a history rewrite conflicts or otherwise fails, `gut` aborts the rewrite and restores the original HEAD, working-tree contents, and Git index. The protected before-state ref is retained if automatic rollback itself cannot complete.
+
+Use `--plan` on any commit-placement command to inspect and persist a non-mutating rewrite plan before applying it. Plans contain the resolved target, branch, HEAD, affected commit topology, merge-preservation flag, selection, and a repository-state token. `gut apply <plan-id>` executes only if the branch and full local state still match the plan.
+
+```sh
+gut commit --update <commit> --hunk <id> --plan --json
+gut apply plan-<id> --json
+```
 
 `gut review` shows the full current-branch diff against the merge-base with `origin/main`. Use `--base <ref>` for another base, or `--stat`, `--commits`, and `--files` for focused human-readable views. JSON review output includes branch/base/merge-base/HEAD information, commits, changed files, additions/deletions, parsed diff hunks, stat output, and the complete patch.
 
