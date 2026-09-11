@@ -11,7 +11,7 @@ use std::{
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
-use crate::{commit, log, operation, repository, review};
+use crate::{changes, commit, log, operation, repository, review};
 
 #[derive(Deserialize)]
 struct Request {
@@ -40,6 +40,10 @@ struct CommitPlaceParams {
     mode: String,
     target: String,
     message: Option<String>,
+    #[serde(default)]
+    files: Vec<String>,
+    #[serde(default)]
+    hunks: Vec<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -135,6 +139,7 @@ fn dispatch(method: &str, params: Value) -> Result<Value, String> {
             "methods": [
                 "runtime.describe",
                 "repository.get",
+                "changes.get",
                 "status.get",
                 "log.get",
                 "review.get",
@@ -151,6 +156,7 @@ fn dispatch(method: &str, params: Value) -> Result<Value, String> {
             "commitPlacementModes": ["before", "update", "after"]
         })),
         "repository.get" => to_value(repository::inspect()?),
+        "changes.get" => to_value(changes::inspect()?),
         "status.get" => {
             let params: StatusParams = decode_default(params)?;
             let remote = params.remote.as_deref().unwrap_or("origin");
@@ -179,6 +185,10 @@ fn dispatch(method: &str, params: Value) -> Result<Value, String> {
                 placement,
                 params.message.as_deref(),
                 true,
+                &changes::Selection {
+                    files: params.files,
+                    hunks: params.hunks,
+                },
             )?)
         }
         "operation.log" => to_value(operation::log()?),

@@ -9,6 +9,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use serde::Serialize;
 
+mod changes;
 mod commit;
 mod log;
 mod operation;
@@ -65,7 +66,18 @@ enum Commands {
 
         #[arg(short = 'm', long)]
         message: Option<String>,
+
+        /// Select all staged/unstaged/untracked changes for this path. Repeatable.
+        #[arg(long = "file", value_name = "PATH")]
+        files: Vec<String>,
+
+        /// Select one stable hunk ID from `gut changes`. Repeatable.
+        #[arg(long = "hunk", value_name = "HUNK_ID")]
+        hunks: Vec<String>,
     },
+
+    /// Inspect staged, unstaged, and untracked changes with stable file/hunk IDs.
+    Changes,
 
     /// Show branch inclusion state and worktree cleanliness.
     Status {
@@ -218,12 +230,15 @@ fn run() -> Result<ExitCode, String> {
             before,
             after,
             message,
+            files,
+            hunks,
         } => {
             let placement = commit::Placement::from_args(update, before, after)?;
             let output = commit::place_current_changes(
                 placement,
                 message.as_deref(),
                 matches!(format, OutputFormat::Json),
+                &changes::Selection { files, hunks },
             )?;
             if matches!(format, OutputFormat::Json) {
                 println!(
@@ -234,6 +249,26 @@ fn run() -> Result<ExitCode, String> {
                     })
                     .map_err(|error| error.to_string())?
                 );
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Changes => {
+            let output = changes::inspect()?;
+            match format {
+                OutputFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&JsonEnvelope {
+                        schema_version: 1,
+                        data: output,
+                    })
+                    .map_err(|error| error.to_string())?
+                ),
+                OutputFormat::Human => print_changes(&output),
+                OutputFormat::Plain | OutputFormat::Values => {
+                    for file in &output.files {
+                        println!("{}", file.path);
+                    }
+                }
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -785,6 +820,34 @@ fn print_list(
     }
 
     Ok(())
+}
+
+fn print_changes(output: &changes::ChangesResult) {
+    for file in &output.files {
+        let mut states = Vec::new();
+        if file.staged.is_some() {
+            states.push("staged");
+        }
+        if file.unstaged.is_some() {
+            states.push("unstaged");
+        }
+        if file.untracked {
+            states.push("untracked");
+        }
+        println!("{}  [{}]", file.path, states.join(", "));
+        for (name, layer) in [("staged", &file.staged), ("unstaged", &file.unstaged)] {
+            if let Some(layer) = layer {
+                for hunk in &layer.hunks {
+                    let selector = if hunk.selectable {
+                        hunk.id.as_str()
+                    } else {
+                        "-"
+                    };
+                    println!("  {name:<8} {selector}  {}", hunk.header);
+                }
+            }
+        }
+    }
 }
 
 fn print_values(values: &[String]) {

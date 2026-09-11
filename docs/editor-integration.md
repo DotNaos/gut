@@ -97,6 +97,16 @@ The result is the same model as `gut review --json`, including:
 - parsed diff hunks
 - complete stat and patch text
 
+## Working changes and selection
+
+Editors should use `changes.get` (or `gut changes --json`) instead of parsing `git diff`. The result separates staged and unstaged layers per path, marks untracked files, and exposes stable IDs for files and text hunks. Hunk IDs identify the exact layer/path/patch content and therefore change when that hunk changes.
+
+```json
+{"id":"changes","method":"changes.get"}
+```
+
+A complete path can be selected with `files`; selectable text hunks can be selected with `hunks`. Non-selected changes retain their original staged, unstaged, or untracked state. Additions, deletions, binary files, and untracked files are whole-file selections.
+
 ## Commit placement / drag and drop
 
 A UI must map drag placement to `commit.place` without reproducing Git rewrite logic:
@@ -116,12 +126,14 @@ Request shape:
   "params":{
     "mode":"before",
     "target":"<commit-id>",
-    "message":"Optional new commit message"
+    "message":"Optional new commit message",
+    "files":["src/foo.rs"],
+    "hunks":["h-0123456789abcdef"]
   }
 }
 ```
 
-`message` is valid for `before` and `after`; `update` preserves the target commit message. The result includes `operationId`, `targetBefore`, `headBefore`, and `headAfter`.
+`message` is valid for `before` and `after`; `update` preserves the target commit message. `files` and `hunks` are optional; omitting both preserves the original behavior of placing all current changes. The result includes `operationId`, `targetBefore`, `headBefore`, and `headAfter`.
 
 Clients must treat the three mode identifiers as semantic API values. Display wording can be localized or changed independently.
 
