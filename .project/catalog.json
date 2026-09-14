@@ -1,0 +1,12 @@
+{
+  "pendingConfiguration": true,
+  "formatVersion": 2,
+  "moduleVersions": {
+    "repo": "0.1.0"
+  },
+  "source": "/data/catalog",
+  "modules": [
+    "repo"
+  ],
+  "revision": ""
+}
