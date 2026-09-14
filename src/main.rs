@@ -115,6 +115,12 @@ enum Commands {
         filter: Vec<StatusFilter>,
     },
 
+    /// Manage local branches.
+    Branch {
+        #[command(subcommand)]
+        command: BranchCommands,
+    },
+
     /// List branches, excluding main.
     Branches {
         #[arg(long, default_value = "origin")]
@@ -184,6 +190,16 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum BranchCommands {
+    /// Create and switch to backup/<current-branch>.
+    Backup {
+        /// Push the backup branch to origin and set its upstream.
+        #[arg(long)]
+        push: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum OpCommands {
     /// List recorded mutating gut operations, newest first.
     Log,
@@ -201,6 +217,14 @@ enum OpCommands {
         #[arg(long, value_name = "COMMIT")]
         expected_head: Option<String>,
     },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BranchBackupOutput {
+    source_branch: String,
+    backup_branch: String,
+    pushed: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -385,6 +409,31 @@ fn run() -> Result<ExitCode, String> {
             print_status(format, &output, &filter)?;
             Ok(ExitCode::SUCCESS)
         }
+        Commands::Branch { command } => match command {
+            BranchCommands::Backup { push } => {
+                let output = branch_backup(push)?;
+                match format {
+                    OutputFormat::Json => println!(
+                        "{}",
+                        serde_json::to_string_pretty(&JsonEnvelope {
+                            schema_version: 1,
+                            data: output,
+                        })
+                        .map_err(|error| error.to_string())?
+                    ),
+                    OutputFormat::Human => {
+                        println!("created and switched to {}", output.backup_branch);
+                        if output.pushed {
+                            println!("pushed to origin/{}", output.backup_branch);
+                        }
+                    }
+                    OutputFormat::Plain | OutputFormat::Values => {
+                        println!("{}", output.backup_branch)
+                    }
+                }
+                Ok(ExitCode::SUCCESS)
+            }
+        },
         Commands::Branches {
             remote,
             main,
@@ -611,6 +660,26 @@ curl -fsSL "https://raw.githubusercontent.com/DotNaos/gut/$commit/install.sh" | 
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    })
+}
+
+fn branch_backup(push: bool) -> Result<BranchBackupOutput, String> {
+    let source_branch = git_output(&["branch", "--show-current"])?.trim().to_owned();
+    if source_branch.is_empty() {
+        return Err("cannot back up a detached HEAD".to_owned());
+    }
+    let backup_branch = format!("backup/{source_branch}");
+
+    git_output(&["switch", "-c", &backup_branch])?;
+
+    if push {
+        git_output(&["push", "-u", "origin", &backup_branch])?;
+    }
+
+    Ok(BranchBackupOutput {
+        source_branch,
+        backup_branch,
+        pushed: push,
     })
 }
 

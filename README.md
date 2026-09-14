@@ -27,6 +27,7 @@ gut log
 gut op log
 gut op diff <operation>
 gut op undo [operation]
+gut branch backup [--push]
 gut branches
 gut diff <branch>
 gut worktrees
@@ -67,6 +68,13 @@ gut apply plan-<id> --json
 History-editing operations are recorded locally by `gut`. `gut op log` lists them, `gut op diff <operation>` shows the exact before/after diff, and `gut op undo [operation]` restores the state from before an operation. Undo requires a clean working tree and never pushes or rewrites a remote. Gut keeps before/after Git refs for recorded operations so rewritten commits remain reachable locally.
 
 `gut status` is the combined overview: it checks whether each remote branch would still change `origin/main`, and whether registered worktrees are clean or dirty.
+
+`gut branch backup` creates `backup/<current-branch>` at the current HEAD and switches to it immediately. Add `--push` to push the backup branch to `origin` and set its upstream. Existing backup branches are never overwritten.
+
+```sh
+gut branch backup
+gut branch backup --push
+```
 
 `gut diff foo` runs the equivalent of:
 
