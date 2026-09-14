@@ -27,7 +27,7 @@ gut log
 gut op log
 gut op diff <operation>
 gut op undo [operation]
-gut branch backup [--push]
+gut branch backup [--switch] [--push]
 gut branches
 gut diff <branch>
 gut worktrees
@@ -69,11 +69,13 @@ History-editing operations are recorded locally by `gut`. `gut op log` lists the
 
 `gut status` is the combined overview: it checks whether each remote branch would still change `origin/main`, and whether registered worktrees are clean or dirty.
 
-`gut branch backup` creates `backup/<current-branch>` at the current HEAD and switches to it immediately. Add `--push` to push the backup branch to `origin` and set its upstream. Existing backup branches are never overwritten.
+`gut branch backup` creates `backup/<current-branch>` at the current HEAD without changing the checked-out branch. Add `--switch` to switch to the backup branch after creating it, and `--push` to push it to `origin` and set its upstream. Existing backup branches are never overwritten.
 
 ```sh
 gut branch backup
+gut branch backup --switch
 gut branch backup --push
+gut branch backup --switch --push
 ```
 
 `gut diff foo` runs the equivalent of:

@@ -191,8 +191,12 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum BranchCommands {
-    /// Create and switch to backup/<current-branch>.
+    /// Create backup/<current-branch>.
     Backup {
+        /// Switch to the backup branch after creating it.
+        #[arg(long)]
+        switch: bool,
+
         /// Push the backup branch to origin and set its upstream.
         #[arg(long)]
         push: bool,
@@ -224,6 +228,7 @@ enum OpCommands {
 struct BranchBackupOutput {
     source_branch: String,
     backup_branch: String,
+    switched: bool,
     pushed: bool,
 }
 
@@ -410,8 +415,8 @@ fn run() -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Commands::Branch { command } => match command {
-            BranchCommands::Backup { push } => {
-                let output = branch_backup(push)?;
+            BranchCommands::Backup { switch, push } => {
+                let output = branch_backup(switch, push)?;
                 match format {
                     OutputFormat::Json => println!(
                         "{}",
@@ -422,7 +427,11 @@ fn run() -> Result<ExitCode, String> {
                         .map_err(|error| error.to_string())?
                     ),
                     OutputFormat::Human => {
-                        println!("created and switched to {}", output.backup_branch);
+                        if output.switched {
+                            println!("created and switched to {}", output.backup_branch);
+                        } else {
+                            println!("created {}", output.backup_branch);
+                        }
                         if output.pushed {
                             println!("pushed to origin/{}", output.backup_branch);
                         }
@@ -663,14 +672,18 @@ curl -fsSL "https://raw.githubusercontent.com/DotNaos/gut/$commit/install.sh" | 
     })
 }
 
-fn branch_backup(push: bool) -> Result<BranchBackupOutput, String> {
+fn branch_backup(switch: bool, push: bool) -> Result<BranchBackupOutput, String> {
     let source_branch = git_output(&["branch", "--show-current"])?.trim().to_owned();
     if source_branch.is_empty() {
         return Err("cannot back up a detached HEAD".to_owned());
     }
     let backup_branch = format!("backup/{source_branch}");
 
-    git_output(&["switch", "-c", &backup_branch])?;
+    git_output(&["branch", &backup_branch])?;
+
+    if switch {
+        git_output(&["switch", &backup_branch])?;
+    }
 
     if push {
         git_output(&["push", "-u", "origin", &backup_branch])?;
@@ -679,6 +692,7 @@ fn branch_backup(push: bool) -> Result<BranchBackupOutput, String> {
     Ok(BranchBackupOutput {
         source_branch,
         backup_branch,
+        switched: switch,
         pushed: push,
     })
 }
