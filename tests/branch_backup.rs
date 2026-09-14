@@ -50,11 +50,28 @@ fn gut(repo: &Path, args: &[&str]) -> Output {
 }
 
 #[test]
-fn backup_creates_matching_prefixed_branch_and_switches_to_it() {
+fn backup_creates_matching_prefixed_branch_without_switching() {
     let repo = repo();
     let head = git(&repo, &["rev-parse", "HEAD"]);
 
     let output = gut(&repo, &["branch", "backup"]);
+    assert!(
+        output.status.success(),
+        "gut failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(git(&repo, &["branch", "--show-current"]), "feature/nested");
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&repo, &["rev-parse", "backup/feature/nested"]), head);
+}
+
+#[test]
+fn backup_switch_switches_to_the_backup_branch() {
+    let repo = repo();
+    let head = git(&repo, &["rev-parse", "HEAD"]);
+
+    let output = gut(&repo, &["branch", "backup", "--switch"]);
     assert!(
         output.status.success(),
         "gut failed: {}",
@@ -66,11 +83,10 @@ fn backup_creates_matching_prefixed_branch_and_switches_to_it() {
         "backup/feature/nested"
     );
     assert_eq!(git(&repo, &["rev-parse", "HEAD"]), head);
-    assert_eq!(git(&repo, &["rev-parse", "backup/feature/nested"]), head);
 }
 
 #[test]
-fn backup_push_pushes_to_origin_and_sets_upstream() {
+fn backup_push_pushes_to_origin_without_switching() {
     let repo = repo();
     let remote = repo.with_extension("remote.git");
     fs::create_dir_all(&remote).unwrap();
@@ -87,13 +103,49 @@ fn backup_push_pushes_to_origin_and_sets_upstream() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    assert_eq!(git(&repo, &["branch", "--show-current"]), "feature/nested");
     assert_eq!(
-        git(&repo, &["rev-parse", "--abbrev-ref", "@{upstream}"]),
+        git(
+            &repo,
+            &[
+                "for-each-ref",
+                "--format=%(upstream:short)",
+                "refs/heads/backup/feature/nested",
+            ],
+        ),
         "origin/backup/feature/nested"
     );
     assert_eq!(
         git(&remote, &["rev-parse", "refs/heads/backup/feature/nested"]),
-        git(&repo, &["rev-parse", "HEAD"])
+        git(&repo, &["rev-parse", "backup/feature/nested"])
+    );
+}
+
+#[test]
+fn backup_push_and_switch_can_be_combined() {
+    let repo = repo();
+    let remote = repo.with_extension("remote.git");
+    fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "--bare"]);
+    git(
+        &repo,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+
+    let output = gut(&repo, &["branch", "backup", "--push", "--switch"]);
+    assert!(
+        output.status.success(),
+        "gut failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(
+        git(&repo, &["branch", "--show-current"]),
+        "backup/feature/nested"
+    );
+    assert_eq!(
+        git(&repo, &["rev-parse", "--abbrev-ref", "@{upstream}"]),
+        "origin/backup/feature/nested"
     );
 }
 
