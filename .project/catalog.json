@@ -2,10 +2,16 @@
   "pendingConfiguration": true,
   "formatVersion": 2,
   "moduleVersions": {
+    "cli.rust": "0.1.0",
     "repo": "0.1.0"
   },
   "source": "/data/catalog",
   "modules": [
+    "cli.rust",
+    "repo"
+  ],
+  "roots": [
+    "cli.rust",
     "repo"
   ],
   "revision": ""
