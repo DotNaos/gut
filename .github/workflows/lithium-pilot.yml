@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: [self-hosted, linux, x64, dotnaos-lithium-pilot-73eea1]
+    runs-on: dotnaos-lithium-pilot-73eea1
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
