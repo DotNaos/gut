@@ -1,0 +1,27 @@
+name: lithium-pilot
+# Temporary: one hand-started JIT runner on the FHGR Lithium cluster (DotNaos/systems#331).
+on:
+  push:
+    branches: [ci/lithium-pilot]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: [self-hosted, linux, x64, dotnaos-lithium-pilot-73eea1]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Environment
+        run: |
+          echo "host=$(hostname) nproc=$(nproc) slurm_job=${SLURM_JOB_ID:-none}"
+          git --version
+          rustc +1.98.1 --version
+          cargo +1.98.1 --version
+          df -h "$GITHUB_WORKSPACE" | tail -1
+      - name: Test
+        run: |
+          start=$(date +%s.%N)
+          cargo +1.98.1 test -j 4 \
+            --test commit_placement --test merge_history --test selective_changes \
+            -- --test-threads=4
+          echo "wall_s=$(echo "$(date +%s.%N) - $start" | bc)"
