@@ -207,3 +207,7 @@ gut completions powershell
 ```
 
 The installer writes completions automatically for Bash, Zsh, and Fish when it can identify the current shell. For Zsh, `~/.zfunc` must be present in `fpath`.
+
+## Lizenz
+
+GNU Affero General Public License v3.0 or later, siehe [LICENSE](LICENSE). © Oliver Schütz
