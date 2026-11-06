@@ -3,7 +3,7 @@ name = "gut"
 version = "0.1.0"
 edition = "2024"
 description = "Good Git: small Git helpers for everyday repository inspection and cleanup"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/DotNaos/gut"
 
 [dependencies]
